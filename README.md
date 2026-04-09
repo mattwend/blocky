@@ -27,3 +27,6 @@ cargo test
 cargo run --bin demo
 cargo run --bin repl
 ```
+
+The `repl` binary opens an interactive terminal UI powered by `ratatui` and `crossterm`.
+Press `Esc` to exit.
