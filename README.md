@@ -24,5 +24,6 @@ detect tampering.
 
 ```bash
 cargo test
-cargo run
+cargo run --bin demo
+cargo run --bin repl
 ```
