@@ -9,7 +9,7 @@ use ratatui::{
     Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Text},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
@@ -45,10 +45,13 @@ pub enum ReplCommand {
     Quit,
 }
 
+const MAX_OUTPUT_LINES: usize = 500;
+
 pub struct Repl {
     blockchain: Blockchain,
     input: String,
     output: Vec<String>,
+    scroll_offset: u16,
 }
 
 impl Repl {
@@ -60,6 +63,7 @@ impl Repl {
                 "Welcome to Blocky REPL".to_string(),
                 Self::help_text().to_string(),
             ],
+            scroll_offset: 0,
         }
     }
 
@@ -147,6 +151,18 @@ impl Repl {
                             Err(error) => self.push_output(format!("Error: {error}")),
                         }
                     }
+                    KeyCode::Up => {
+                        self.scroll_offset = self.scroll_offset.saturating_add(1);
+                    }
+                    KeyCode::Down => {
+                        self.scroll_offset = self.scroll_offset.saturating_sub(1);
+                    }
+                    KeyCode::PageUp => {
+                        self.scroll_offset = self.scroll_offset.saturating_add(10);
+                    }
+                    KeyCode::PageDown => {
+                        self.scroll_offset = self.scroll_offset.saturating_sub(10);
+                    }
                     KeyCode::Esc => return Ok(()),
                     _ => {}
                 }
@@ -155,14 +171,22 @@ impl Repl {
     }
 
     fn draw(&self, frame: &mut ratatui::Frame<'_>) {
-        let areas = Layout::default()
+        let vertical = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(10), Constraint::Length(3)])
+            .split(frame.area());
+        let horizontal = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(72), Constraint::Percentage(28)])
+            .split(vertical[0]);
+        let sidebar = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
+                Constraint::Length(8),
                 Constraint::Min(8),
-                Constraint::Length(3),
-                Constraint::Length(2),
+                Constraint::Length(5),
             ])
-            .split(frame.area());
+            .split(horizontal[1]);
 
         let output_lines: Vec<Line<'_>> = self
             .output
@@ -170,24 +194,113 @@ impl Repl {
             .map(|line| Line::from(line.as_str()))
             .collect();
         let output = Paragraph::new(Text::from(output_lines))
-            .block(Block::default().title("Output").borders(Borders::ALL))
+            .block(
+                Block::default()
+                    .title("Output")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Cyan)),
+            )
+            .wrap(Wrap { trim: false })
+            .scroll((self.scroll_offset, 0));
+        frame.render_widget(output, horizontal[0]);
+
+        let status = Paragraph::new(self.status_lines())
+            .block(
+                Block::default()
+                    .title("Status")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Green)),
+            )
             .wrap(Wrap { trim: false });
-        frame.render_widget(output, areas[0]);
+        frame.render_widget(status, sidebar[0]);
 
-        let input = Paragraph::new(self.input.as_str())
-            .block(Block::default().title("Input").borders(Borders::ALL));
-        frame.render_widget(input, areas[1]);
+        let pending = Paragraph::new(self.pending_lines())
+            .block(
+                Block::default()
+                    .title("Pending Transactions")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Yellow)),
+            )
+            .wrap(Wrap { trim: false });
+        frame.render_widget(pending, sidebar[1]);
 
-        let help = Paragraph::new("Enter command, Esc quits")
+        let help = Paragraph::new(self.help_lines())
             .style(Style::default().fg(Color::DarkGray))
-            .block(Block::default().borders(Borders::ALL).title("Help"));
-        frame.render_widget(help, areas[2]);
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Help")
+                    .border_style(Style::default().fg(Color::Magenta)),
+            )
+            .wrap(Wrap { trim: false });
+        frame.render_widget(help, sidebar[2]);
 
-        frame.set_cursor_position((areas[1].x + self.input.len() as u16 + 1, areas[1].y + 1));
+        let input = Paragraph::new(self.input.as_str()).block(
+            Block::default()
+                .title("Input")
+                .borders(Borders::ALL)
+                .border_style(
+                    Style::default()
+                        .fg(Color::Blue)
+                        .add_modifier(Modifier::BOLD),
+                ),
+        );
+        frame.render_widget(input, vertical[1]);
+
+        frame.set_cursor_position((
+            vertical[1].x + self.input.len() as u16 + 1,
+            vertical[1].y + 1,
+        ));
     }
 
     fn push_output(&mut self, line: String) {
         self.output.push(line);
+        if self.output.len() > MAX_OUTPUT_LINES {
+            let excess = self.output.len() - MAX_OUTPUT_LINES;
+            self.output.drain(0..excess);
+        }
+        self.scroll_offset = 0;
+    }
+
+    fn status_lines(&self) -> Text<'_> {
+        Text::from(vec![
+            Line::from(format!("Blocks: {}", self.blockchain.chain.len())),
+            Line::from(format!(
+                "Pending: {}",
+                self.blockchain.pending_transactions.len()
+            )),
+            Line::from(format!("Difficulty: {}", self.blockchain.difficulty)),
+            Line::from(format!("Valid: {}", self.blockchain.is_valid())),
+        ])
+    }
+
+    fn pending_lines(&self) -> Text<'_> {
+        if self.blockchain.pending_transactions.is_empty() {
+            return Text::from("(none)");
+        }
+
+        let lines = self
+            .blockchain
+            .pending_transactions
+            .iter()
+            .map(|transaction| {
+                Line::from(format!(
+                    "{} -> {}: {}",
+                    transaction.sender, transaction.receiver, transaction.amount
+                ))
+            })
+            .collect::<Vec<_>>();
+
+        Text::from(lines)
+    }
+
+    fn help_lines(&self) -> Text<'_> {
+        Text::from(vec![
+            Line::from("Enter: run command"),
+            Line::from("Up/Down: scroll output"),
+            Line::from("PgUp/PgDn: fast scroll"),
+            Line::from("Esc: quit"),
+        ])
     }
 
     fn help_text() -> &'static str {

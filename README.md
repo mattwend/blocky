@@ -29,4 +29,11 @@ cargo run --bin repl
 ```
 
 The `repl` binary opens an interactive terminal UI powered by `ratatui` and `crossterm`.
-Press `Esc` to exit.
+
+Key controls:
+- `Enter` executes the current command
+- `Up` / `Down` scroll the output pane
+- `PageUp` / `PageDown` scroll faster
+- `Esc` exits
+
+The UI includes status and pending-transaction side panels in addition to the command output.
