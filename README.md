@@ -32,8 +32,11 @@ The `repl` binary opens an interactive terminal UI powered by `ratatui` and `cro
 
 Key controls:
 - `Enter` executes the current command
-- `Up` / `Down` scroll the output pane
+- `Up` / `Down` scroll the output pane when the input is empty, or navigate command history when it is not
 - `PageUp` / `PageDown` scroll faster
 - `Esc` exits
 
-The UI includes status and pending-transaction side panels in addition to the command output.
+Commands support quoted arguments, for example:
+- `add "alice smith" "bob jones" 42`
+
+The UI includes status, pending-transaction, and command-history context in addition to the command output.

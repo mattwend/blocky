@@ -14,6 +14,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
 };
 use thiserror::Error;
+use tracing::{debug, info};
 
 use crate::{Blockchain, BlockyError, Transaction, app::demo::render_chain};
 
@@ -29,6 +30,8 @@ pub enum ReplError {
     InvalidAddUsage,
     #[error("invalid amount: {0}")]
     InvalidAmount(String),
+    #[error("unterminated quoted string")]
+    UnterminatedQuote,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,12 +49,15 @@ pub enum ReplCommand {
 }
 
 const MAX_OUTPUT_LINES: usize = 500;
+const MAX_HISTORY_ENTRIES: usize = 100;
 
 pub struct Repl {
     blockchain: Blockchain,
     input: String,
     output: Vec<String>,
     scroll_offset: u16,
+    history: Vec<String>,
+    history_index: Option<usize>,
 }
 
 impl Repl {
@@ -64,6 +70,8 @@ impl Repl {
                 Self::help_text().to_string(),
             ],
             scroll_offset: 0,
+            history: Vec::new(),
+            history_index: None,
         }
     }
 
@@ -85,6 +93,7 @@ impl Repl {
 
     pub fn execute_line(&mut self, line: &str) -> Result<bool, ReplError> {
         self.push_output(format!("> {line}"));
+        info!(command = line, "executing repl command");
 
         match parse_command(line)? {
             ReplCommand::Add {
@@ -92,24 +101,35 @@ impl Repl {
                 receiver,
                 amount,
             } => {
-                self.blockchain
-                    .add_transaction(Transaction::new(sender, receiver, amount))?;
+                self.blockchain.add_transaction(Transaction::new(
+                    sender.clone(),
+                    receiver.clone(),
+                    amount,
+                ))?;
+                info!(sender = %sender, receiver = %receiver, amount, "queued transaction");
                 self.push_output("Transaction queued.".to_string());
                 Ok(false)
             }
             ReplCommand::Mine => {
                 let block = self.blockchain.mine_pending()?;
+                info!(nonce = block.nonce, "mined pending transactions");
                 self.push_output(format!("Mined block with nonce {}.", block.nonce));
                 Ok(false)
             }
             ReplCommand::Print => {
+                debug!(
+                    blocks = self.blockchain.chain.len(),
+                    "rendering blockchain state in repl"
+                );
                 for line in render_chain(&self.blockchain).lines() {
                     self.push_output(line.to_string());
                 }
                 Ok(false)
             }
             ReplCommand::Validate => {
-                self.push_output(format!("Chain valid: {}", self.blockchain.is_valid()));
+                let is_valid = self.blockchain.is_valid();
+                info!(is_valid, "validated blockchain state");
+                self.push_output(format!("Chain valid: {is_valid}"));
                 Ok(false)
             }
             ReplCommand::Help => {
@@ -133,17 +153,22 @@ impl Repl {
                 match key.code {
                     KeyCode::Char(c) => {
                         self.input.push(c);
+                        self.history_index = None;
                     }
                     KeyCode::Backspace => {
                         self.input.pop();
+                        self.history_index = None;
                     }
                     KeyCode::Enter => {
                         let line = self.input.trim().to_string();
                         self.input.clear();
+                        self.history_index = None;
 
                         if line.is_empty() {
                             continue;
                         }
+
+                        self.record_history(line.clone());
 
                         match self.execute_line(&line) {
                             Ok(true) => return Ok(()),
@@ -152,10 +177,18 @@ impl Repl {
                         }
                     }
                     KeyCode::Up => {
-                        self.scroll_offset = self.scroll_offset.saturating_add(1);
+                        if self.input.is_empty() {
+                            self.scroll_offset = self.scroll_offset.saturating_add(1);
+                        } else {
+                            self.navigate_history_older();
+                        }
                     }
                     KeyCode::Down => {
-                        self.scroll_offset = self.scroll_offset.saturating_sub(1);
+                        if self.input.is_empty() {
+                            self.scroll_offset = self.scroll_offset.saturating_sub(1);
+                        } else {
+                            self.navigate_history_newer();
+                        }
                     }
                     KeyCode::PageUp => {
                         self.scroll_offset = self.scroll_offset.saturating_add(10);
@@ -262,6 +295,47 @@ impl Repl {
         self.scroll_offset = 0;
     }
 
+    fn record_history(&mut self, line: String) {
+        if self.history.last() == Some(&line) {
+            return;
+        }
+
+        self.history.push(line);
+        if self.history.len() > MAX_HISTORY_ENTRIES {
+            let excess = self.history.len() - MAX_HISTORY_ENTRIES;
+            self.history.drain(0..excess);
+        }
+    }
+
+    fn navigate_history_older(&mut self) {
+        if self.history.is_empty() {
+            return;
+        }
+
+        let next_index = self
+            .history_index
+            .map(|index| index.saturating_sub(1))
+            .unwrap_or(self.history.len().saturating_sub(1));
+        self.history_index = Some(next_index);
+        self.input = self.history[next_index].clone();
+    }
+
+    fn navigate_history_newer(&mut self) {
+        let Some(current_index) = self.history_index else {
+            return;
+        };
+
+        let next_index = current_index.saturating_add(1);
+        if next_index >= self.history.len() {
+            self.history_index = None;
+            self.input.clear();
+            return;
+        }
+
+        self.history_index = Some(next_index);
+        self.input = self.history[next_index].clone();
+    }
+
     fn status_lines(&self) -> Text<'_> {
         Text::from(vec![
             Line::from(format!("Blocks: {}", self.blockchain.chain.len())),
@@ -271,6 +345,7 @@ impl Repl {
             )),
             Line::from(format!("Difficulty: {}", self.blockchain.difficulty)),
             Line::from(format!("Valid: {}", self.blockchain.is_valid())),
+            Line::from(format!("History: {}", self.history.len())),
         ])
     }
 
@@ -297,8 +372,9 @@ impl Repl {
     fn help_lines(&self) -> Text<'_> {
         Text::from(vec![
             Line::from("Enter: run command"),
-            Line::from("Up/Down: scroll output"),
+            Line::from("Up/Down: scroll or history"),
             Line::from("PgUp/PgDn: fast scroll"),
+            Line::from("Quotes: add \"alice a\" bob 4"),
             Line::from("Esc: quit"),
         ])
     }
@@ -309,28 +385,24 @@ impl Repl {
 }
 
 pub fn parse_command(line: &str) -> Result<ReplCommand, ReplError> {
-    let mut parts = line.split_whitespace();
-    let Some(command) = parts.next() else {
+    let parts = tokenize(line)?;
+    let Some(command) = parts.first().map(String::as_str) else {
         return Err(ReplError::UnknownCommand(String::new()));
     };
 
     match command {
         "add" => {
-            let sender = parts.next().ok_or(ReplError::InvalidAddUsage)?.to_string();
-            let receiver = parts.next().ok_or(ReplError::InvalidAddUsage)?.to_string();
-            let amount_raw = parts.next().ok_or(ReplError::InvalidAddUsage)?;
-
-            if parts.next().is_some() {
+            if parts.len() != 4 {
                 return Err(ReplError::InvalidAddUsage);
             }
 
-            let amount = amount_raw
+            let amount = parts[3]
                 .parse::<u64>()
-                .map_err(|_| ReplError::InvalidAmount(amount_raw.to_string()))?;
+                .map_err(|_| ReplError::InvalidAmount(parts[3].clone()))?;
 
             Ok(ReplCommand::Add {
-                sender,
-                receiver,
+                sender: parts[1].clone(),
+                receiver: parts[2].clone(),
                 amount,
             })
         }
@@ -343,9 +415,39 @@ pub fn parse_command(line: &str) -> Result<ReplCommand, ReplError> {
     }
 }
 
+fn tokenize(line: &str) -> Result<Vec<String>, ReplError> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+
+    for character in line.chars() {
+        match character {
+            '"' => {
+                in_quotes = !in_quotes;
+            }
+            c if c.is_whitespace() && !in_quotes => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            c => current.push(c),
+        }
+    }
+
+    if in_quotes {
+        return Err(ReplError::UnterminatedQuote);
+    }
+
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+
+    Ok(tokens)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Repl, ReplCommand, parse_command};
+    use super::{Repl, ReplCommand, parse_command, tokenize};
 
     #[test]
     fn parses_add_command() {
@@ -361,8 +463,32 @@ mod tests {
     }
 
     #[test]
+    fn parses_quoted_add_command() {
+        let command = parse_command("add \"alice smith\" \"bob jones\" 42").unwrap();
+        assert_eq!(
+            command,
+            ReplCommand::Add {
+                sender: "alice smith".into(),
+                receiver: "bob jones".into(),
+                amount: 42,
+            }
+        );
+    }
+
+    #[test]
     fn rejects_invalid_add_command() {
         assert!(parse_command("add alice bob").is_err());
+    }
+
+    #[test]
+    fn detects_unterminated_quote() {
+        assert!(parse_command("add \"alice bob 10").is_err());
+    }
+
+    #[test]
+    fn tokenizes_quoted_segments() {
+        let tokens = tokenize("add \"alice smith\" bob 5").unwrap();
+        assert_eq!(tokens, vec!["add", "alice smith", "bob", "5"]);
     }
 
     #[test]

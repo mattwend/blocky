@@ -113,7 +113,7 @@ mod tests {
 
     #[test]
     fn tampering_is_detected() {
-        let mut chain = Blockchain::new(4);
+        let mut chain = Blockchain::new(12);
         chain
             .add_transaction(Transaction {
                 sender: "alice".into(),
