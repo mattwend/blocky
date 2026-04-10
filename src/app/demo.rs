@@ -1,7 +1,10 @@
+use tracing::info;
+
 use crate::{Blockchain, BlockyError, Transaction, hash_to_hex};
 
 pub fn build_demo_blockchain(difficulty: u32) -> Result<Blockchain, BlockyError> {
     let mut blockchain = Blockchain::new(difficulty);
+    info!(difficulty, "initialized demo blockchain");
 
     let sample_transactions = [
         Transaction::new("alice", "bob", 25),
@@ -10,10 +13,17 @@ pub fn build_demo_blockchain(difficulty: u32) -> Result<Blockchain, BlockyError>
     ];
 
     for transaction in sample_transactions {
+        info!(
+            sender = %transaction.sender,
+            receiver = %transaction.receiver,
+            amount = transaction.amount,
+            "queueing demo transaction"
+        );
         blockchain.add_transaction(transaction)?;
     }
 
-    blockchain.mine_pending()?;
+    let block = blockchain.mine_pending()?;
+    info!(nonce = block.nonce, "mined demo block");
 
     Ok(blockchain)
 }
