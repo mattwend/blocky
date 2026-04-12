@@ -1,5 +1,5 @@
 use blocky::{
-    BlockyError,
+    BlockyError, Payload,
     app::demo::{build_demo_blockchain, render_chain},
 };
 use tracing::{error, info};
@@ -32,8 +32,9 @@ fn run() -> Result<(), BlockyError> {
     println!("\nTampering with the first mined block...");
     if let Some(block) = blockchain.chain.get_mut(1)
         && let Some(transaction) = block.transactions.get_mut(0)
+        && let Payload::Transfer { amount, .. } = &mut transaction.payload
     {
-        transaction.amount += 1;
+        *amount += 1;
     }
     println!("Chain valid after tampering: {}", blockchain.is_valid());
 

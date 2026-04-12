@@ -1,24 +1,30 @@
 use tracing::info;
 
-use crate::{Blockchain, BlockyError, Transaction, hash_to_hex};
+use crate::{
+    Blockchain, BlockyError, Payload, Transaction, address_from_name, address_to_hex, hash_to_hex,
+};
 
 pub fn build_demo_blockchain(difficulty: u32) -> Result<Blockchain, BlockyError> {
     let mut blockchain = Blockchain::new(difficulty);
     info!(difficulty, "initialized demo blockchain");
 
+    let alice = address_from_name("alice");
+    let bob = address_from_name("bob");
+    let carol = address_from_name("carol");
+    let dave = address_from_name("dave");
+
+    blockchain.credit_balance(alice, 25);
+    blockchain.credit_balance(bob, 10);
+    blockchain.credit_balance(carol, 5);
+
     let sample_transactions = [
-        Transaction::new("alice", "bob", 25),
-        Transaction::new("bob", "carol", 10),
-        Transaction::new("carol", "dave", 5),
+        Transaction::new_transfer(alice, 0, bob, 25),
+        Transaction::new_transfer(bob, 0, carol, 10),
+        Transaction::new_transfer(carol, 0, dave, 5),
     ];
 
     for transaction in sample_transactions {
-        info!(
-            sender = %transaction.sender,
-            receiver = %transaction.receiver,
-            amount = transaction.amount,
-            "queueing demo transaction"
-        );
+        info!(sender = %address_to_hex(&transaction.sender), nonce = transaction.nonce, "queueing demo transaction");
         blockchain.add_transaction(transaction)?;
     }
 
@@ -48,12 +54,33 @@ pub fn render_chain(blockchain: &Blockchain) -> String {
         }
 
         for transaction in &block.transactions {
-            output.push_str(&format!(
-                "    {} -> {}: {} @ {}\n",
-                transaction.sender, transaction.receiver, transaction.amount, transaction.timestamp
-            ));
+            let sender = short_address(&transaction.sender);
+            let details = match &transaction.payload {
+                Payload::Transfer { receiver, amount } => {
+                    format!("{sender} -> {}: {}", short_address(receiver), amount)
+                }
+                Payload::Deploy { code } => {
+                    format!("{sender} deploy {} bytes", code.len())
+                }
+                Payload::Call {
+                    contract,
+                    method,
+                    deposit,
+                    ..
+                } => format!(
+                    "{sender} call {}.{} deposit {}",
+                    short_address(contract),
+                    method,
+                    deposit
+                ),
+            };
+            output.push_str(&format!("    {details} @ {}\n", transaction.timestamp));
         }
     }
 
     output
+}
+
+fn short_address(address: &crate::Address) -> String {
+    address_to_hex(address).chars().take(8).collect()
 }

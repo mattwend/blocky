@@ -1,14 +1,22 @@
 use thiserror::Error;
 
 use crate::{
-    Transaction,
+    Address, Transaction, WorldState,
     block::{Block, Hash, hash_meets_difficulty},
+    state::StateError,
+    transaction::Payload,
 };
 
 #[derive(Debug, Error)]
 pub enum BlockyError {
     #[error("cannot mine a block without pending transactions")]
     NoPendingTransactions,
+    #[error("sender has insufficient balance: available {available}, required {required}")]
+    InsufficientBalance { available: u64, required: u64 },
+    #[error("sender nonce mismatch: expected {expected}, got {got}")]
+    InvalidNonce { expected: u64, got: u64 },
+    #[error(transparent)]
+    State(#[from] StateError),
 }
 
 #[derive(Debug, Clone)]
@@ -16,6 +24,7 @@ pub struct Blockchain {
     pub chain: Vec<Block>,
     pub pending_transactions: Vec<Transaction>,
     pub difficulty: u32,
+    pub state: WorldState,
 }
 
 impl Blockchain {
@@ -27,10 +36,57 @@ impl Blockchain {
             chain: vec![genesis],
             pending_transactions: Vec::new(),
             difficulty,
+            state: WorldState::new(),
         }
     }
 
+    pub fn credit_balance(&mut self, address: Address, amount: u64) {
+        let current = self.state.get_balance(&address);
+        self.state
+            .set_balance(&address, current.saturating_add(amount));
+    }
+
     pub fn add_transaction(&mut self, tx: Transaction) -> Result<(), BlockyError> {
+        let expected_nonce = self
+            .state
+            .get_account(&tx.sender)
+            .map(|account| account.nonce)
+            .unwrap_or(0)
+            + self
+                .pending_transactions
+                .iter()
+                .filter(|pending| pending.sender == tx.sender)
+                .count() as u64;
+        if tx.nonce != expected_nonce {
+            return Err(BlockyError::InvalidNonce {
+                expected: expected_nonce,
+                got: tx.nonce,
+            });
+        }
+
+        let required = match &tx.payload {
+            Payload::Transfer { amount, .. } => *amount,
+            Payload::Deploy { .. } => 0,
+            Payload::Call { deposit, .. } => *deposit,
+        };
+        let reserved = self
+            .pending_transactions
+            .iter()
+            .filter(|pending| pending.sender == tx.sender)
+            .map(|pending| match &pending.payload {
+                Payload::Transfer { amount, .. } => *amount,
+                Payload::Deploy { .. } => 0,
+                Payload::Call { deposit, .. } => *deposit,
+            })
+            .sum::<u64>();
+        let available = self.state.get_balance(&tx.sender);
+        if available < reserved.saturating_add(required) {
+            return Err(BlockyError::InsufficientBalance {
+                available: available.saturating_sub(reserved),
+                required,
+            });
+        }
+
         self.pending_transactions.push(tx);
         Ok(())
     }
@@ -48,6 +104,7 @@ impl Blockchain {
         let transactions = std::mem::take(&mut self.pending_transactions);
         let mut block = Block::new(transactions, prev_hash);
         block.mine(self.difficulty);
+        self.state.apply_block(&block)?;
         self.chain.push(block.clone());
         Ok(block)
     }
@@ -70,13 +127,11 @@ impl Blockchain {
                 return false;
             }
 
-            if index == 0 {
-                continue;
-            }
-
-            let prev = &self.chain[index - 1];
-            if block.prev_hash != prev.compute_hash() {
-                return false;
+            if index > 0 {
+                let prev = &self.chain[index - 1];
+                if block.prev_hash != prev.compute_hash() {
+                    return false;
+                }
             }
         }
 
@@ -87,7 +142,7 @@ impl Blockchain {
 #[cfg(test)]
 mod tests {
     use super::Blockchain;
-    use crate::transaction::Transaction;
+    use crate::transaction::{Transaction, address_from_name};
 
     #[test]
     fn genesis_block_has_zero_prev_hash() {
@@ -98,33 +153,51 @@ mod tests {
     #[test]
     fn valid_chain_stays_valid() {
         let mut chain = Blockchain::new(4);
+        let alice = address_from_name("alice");
+        let bob = address_from_name("bob");
+        chain.credit_balance(alice, 25);
         chain
-            .add_transaction(Transaction {
-                sender: "alice".into(),
-                receiver: "bob".into(),
-                amount: 25,
-                timestamp: 1,
-            })
+            .add_transaction(Transaction::new_transfer(alice, 0, bob, 25))
             .unwrap();
         chain.mine_pending().unwrap();
 
         assert!(chain.is_valid());
+        assert_eq!(chain.state.get_balance(&alice), 0);
+        assert_eq!(chain.state.get_balance(&bob), 25);
+    }
+
+    #[test]
+    fn rejects_transaction_when_balance_is_too_low() {
+        let mut chain = Blockchain::new(4);
+        let alice = address_from_name("alice");
+        let bob = address_from_name("bob");
+
+        let error = chain
+            .add_transaction(Transaction::new_transfer(alice, 0, bob, 25))
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            super::BlockyError::InsufficientBalance { .. }
+        ));
     }
 
     #[test]
     fn tampering_is_detected() {
         let mut chain = Blockchain::new(12);
+        let alice = address_from_name("alice");
+        let bob = address_from_name("bob");
+        chain.credit_balance(alice, 25);
         chain
-            .add_transaction(Transaction {
-                sender: "alice".into(),
-                receiver: "bob".into(),
-                amount: 25,
-                timestamp: 1,
-            })
+            .add_transaction(Transaction::new_transfer(alice, 0, bob, 25))
             .unwrap();
         chain.mine_pending().unwrap();
 
-        chain.chain[1].transactions[0].amount = 999;
+        if let crate::transaction::Payload::Transfer { amount, .. } =
+            &mut chain.chain[1].transactions[0].payload
+        {
+            *amount = 999;
+        }
 
         assert!(!chain.is_valid());
     }

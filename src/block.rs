@@ -73,16 +73,12 @@ pub fn hash_to_hex(hash: &Hash) -> String {
 #[cfg(test)]
 mod tests {
     use super::{Block, hash_meets_difficulty};
-    use crate::transaction::Transaction;
+    use crate::transaction::{Transaction, address_from_name};
 
     #[test]
     fn hash_is_deterministic() {
-        let tx = Transaction {
-            sender: "alice".into(),
-            receiver: "bob".into(),
-            amount: 10,
-            timestamp: 1,
-        };
+        let tx =
+            Transaction::new_transfer(address_from_name("alice"), 0, address_from_name("bob"), 10);
         let block = Block {
             timestamp: 2,
             prev_hash: [7; 32],
@@ -99,12 +95,12 @@ mod tests {
             timestamp: 2,
             prev_hash: [0; 32],
             nonce: 0,
-            transactions: vec![Transaction {
-                sender: "alice".into(),
-                receiver: "bob".into(),
-                amount: 10,
-                timestamp: 1,
-            }],
+            transactions: vec![Transaction::new_transfer(
+                address_from_name("alice"),
+                0,
+                address_from_name("bob"),
+                10,
+            )],
         };
 
         block.mine(8);

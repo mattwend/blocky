@@ -16,7 +16,10 @@ use ratatui::{
 use thiserror::Error;
 use tracing::{debug, info};
 
-use crate::{Blockchain, BlockyError, Transaction, app::demo::render_chain};
+use crate::{
+    Blockchain, BlockyError, Transaction, address_from_name, address_to_hex,
+    app::demo::render_chain,
+};
 
 #[derive(Debug, Error)]
 pub enum ReplError {
@@ -101,9 +104,24 @@ impl Repl {
                 receiver,
                 amount,
             } => {
-                self.blockchain.add_transaction(Transaction::new(
-                    sender.clone(),
-                    receiver.clone(),
+                let sender_address = address_from_name(&sender);
+                let receiver_address = address_from_name(&receiver);
+                let nonce = self
+                    .blockchain
+                    .state
+                    .get_account(&sender_address)
+                    .map(|account| account.nonce)
+                    .unwrap_or(0)
+                    + self
+                        .blockchain
+                        .pending_transactions
+                        .iter()
+                        .filter(|pending| pending.sender == sender_address)
+                        .count() as u64;
+                self.blockchain.add_transaction(Transaction::new_transfer(
+                    sender_address,
+                    nonce,
+                    receiver_address,
                     amount,
                 ))?;
                 info!(sender = %sender, receiver = %receiver, amount, "queued transaction");
@@ -346,6 +364,16 @@ impl Repl {
             Line::from(format!("Difficulty: {}", self.blockchain.difficulty)),
             Line::from(format!("Valid: {}", self.blockchain.is_valid())),
             Line::from(format!("History: {}", self.history.len())),
+            Line::from(format!(
+                "Alice: {}",
+                self.blockchain
+                    .state
+                    .get_balance(&address_from_name("alice"))
+            )),
+            Line::from(format!(
+                "Bob: {}",
+                self.blockchain.state.get_balance(&address_from_name("bob"))
+            )),
         ])
     }
 
@@ -359,10 +387,30 @@ impl Repl {
             .pending_transactions
             .iter()
             .map(|transaction| {
-                Line::from(format!(
-                    "{} -> {}: {}",
-                    transaction.sender, transaction.receiver, transaction.amount
-                ))
+                let description = match &transaction.payload {
+                    crate::Payload::Transfer { receiver, amount } => format!(
+                        "{} -> {}: {}",
+                        short_address(&transaction.sender),
+                        short_address(receiver),
+                        amount
+                    ),
+                    crate::Payload::Deploy { .. } => {
+                        format!("{} deploy", short_address(&transaction.sender))
+                    }
+                    crate::Payload::Call {
+                        contract,
+                        method,
+                        deposit,
+                        ..
+                    } => format!(
+                        "{} call {}.{} ({})",
+                        short_address(&transaction.sender),
+                        short_address(contract),
+                        method,
+                        deposit
+                    ),
+                };
+                Line::from(description)
             })
             .collect::<Vec<_>>();
 
@@ -413,6 +461,11 @@ pub fn parse_command(line: &str) -> Result<ReplCommand, ReplError> {
         "quit" | "exit" => Ok(ReplCommand::Quit),
         other => Err(ReplError::UnknownCommand(other.to_string())),
     }
+}
+
+fn short_address(address: &crate::Address) -> String {
+    let hex = address_to_hex(address);
+    hex.chars().take(8).collect()
 }
 
 fn tokenize(line: &str) -> Result<Vec<String>, ReplError> {
@@ -494,6 +547,8 @@ mod tests {
     #[test]
     fn repl_can_execute_happy_path() {
         let mut repl = Repl::new(4);
+        repl.blockchain
+            .credit_balance(crate::address_from_name("alice"), 5);
 
         assert!(!repl.execute_line("add alice bob 5").unwrap());
         assert!(!repl.execute_line("mine").unwrap());
