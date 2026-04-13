@@ -1,10 +1,11 @@
 use thiserror::Error;
 
 use crate::{
-    Address, Transaction, WorldState,
+    Address, Transaction, VmEngine, WorldState,
     block::{Block, Hash, hash_meets_difficulty},
     state::StateError,
     transaction::Payload,
+    vm::VmError,
 };
 
 #[derive(Debug, Error)]
@@ -17,27 +18,37 @@ pub enum BlockyError {
     InvalidNonce { expected: u64, got: u64 },
     #[error(transparent)]
     State(#[from] StateError),
+    #[error(transparent)]
+    Vm(#[from] VmError),
 }
 
-#[derive(Debug, Clone)]
 pub struct Blockchain {
     pub chain: Vec<Block>,
     pub pending_transactions: Vec<Transaction>,
     pub difficulty: u32,
     pub state: WorldState,
+    pub vm: VmEngine,
 }
 
 impl Blockchain {
     pub fn new(difficulty: u32) -> Self {
+        match Self::try_new(difficulty) {
+            Ok(blockchain) => blockchain,
+            Err(error) => panic!("failed to initialize blockchain: {error}"),
+        }
+    }
+
+    pub fn try_new(difficulty: u32) -> Result<Self, BlockyError> {
         let mut genesis = Block::new(Vec::new(), [0_u8; 32]);
         genesis.mine(difficulty);
 
-        Self {
+        Ok(Self {
             chain: vec![genesis],
             pending_transactions: Vec::new(),
             difficulty,
             state: WorldState::new(),
-        }
+            vm: VmEngine::new()?,
+        })
     }
 
     pub fn credit_balance(&mut self, address: Address, amount: u64) {
