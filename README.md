@@ -28,6 +28,10 @@ cargo run --bin demo
 cargo run --bin repl
 ```
 
+Workspace members:
+- `blocky` — node, chain, VM, REPL
+- `blocky-sdk` — contract-side helpers for decoding `env::read_input()` into a structured call envelope
+
 The `repl` binary opens an interactive terminal UI powered by `ratatui` and `crossterm`.
 
 Key controls:
@@ -39,6 +43,6 @@ Key controls:
 Commands support quoted arguments, for example:
 - `add "alice smith" "bob jones" 42`
 
-Smart-contract calls currently frame input as a Borsh-encoded `CallEnvelope { method, args }` so guest code can decode a structured payload from `env::read_input` instead of relying on ad-hoc raw bytes.
+Smart-contract calls currently frame input as a Borsh-encoded `CallEnvelope { method, args }` so guest code can decode a structured payload from `env::read_input` instead of relying on ad-hoc raw bytes. The `blocky-sdk` crate includes matching helpers to decode the envelope and then deserialize method-specific Borsh argument structs.
 
 The UI includes status, pending-transaction, and command-history context in addition to the command output.
