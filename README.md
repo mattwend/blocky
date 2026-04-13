@@ -39,4 +39,6 @@ Key controls:
 Commands support quoted arguments, for example:
 - `add "alice smith" "bob jones" 42`
 
+Smart-contract calls currently frame input as a Borsh-encoded `CallEnvelope { method, args }` so guest code can decode a structured payload from `env::read_input` instead of relying on ad-hoc raw bytes.
+
 The UI includes status, pending-transaction, and command-history context in addition to the command output.

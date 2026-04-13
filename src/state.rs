@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use thiserror::Error;
 
 use crate::{
-    Address, Block, ExecutionContext,
+    Address, Block, CallEnvelope, ExecutionContext,
     transaction::{Payload, Transaction},
     vm::VmError,
 };
@@ -146,6 +146,8 @@ impl WorldState {
                     .cloned()
                     .ok_or(StateError::ContractCodeMissing)?;
 
+                let envelope = CallEnvelope::new(method.clone(), args.clone());
+                let input = envelope.encode();
                 let mut working_state = self.clone();
                 working_state.transfer(&sender, contract, *deposit)?;
 
@@ -156,14 +158,14 @@ impl WorldState {
                         *contract,
                         *deposit,
                         method,
-                        args,
+                        &input,
                         &code,
                     )?;
                     *self = next_state;
                     context = vm_context;
                 } else {
                     *self = working_state;
-                    context = ExecutionContext::new(sender, *contract, *deposit, args.clone());
+                    context = ExecutionContext::new(sender, *contract, *deposit, input);
                 }
             }
         }

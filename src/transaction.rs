@@ -95,6 +95,7 @@ pub fn address_to_hex(address: &Address) -> String {
 #[cfg(test)]
 mod tests {
     use super::{Payload, Transaction, address_from_name};
+    use crate::CallEnvelope;
 
     #[test]
     fn derived_contract_address_is_deterministic() {
@@ -114,5 +115,26 @@ mod tests {
     #[test]
     fn different_names_map_to_different_addresses() {
         assert_ne!(address_from_name("alice"), address_from_name("bob"));
+    }
+
+    #[test]
+    fn call_payload_args_can_be_framed_with_envelope() {
+        let tx = Transaction::new_call(
+            address_from_name("alice"),
+            0,
+            address_from_name("contract"),
+            "set",
+            CallEnvelope::new("set", vec![1, 2, 3]).encode(),
+            0,
+        );
+
+        match tx.payload {
+            Payload::Call { args, .. } => {
+                let envelope = CallEnvelope::decode(&args).unwrap();
+                assert_eq!(envelope.method, "set");
+                assert_eq!(envelope.args, vec![1, 2, 3]);
+            }
+            payload => panic!("unexpected payload: {payload:?}"),
+        }
     }
 }
