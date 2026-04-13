@@ -2,6 +2,7 @@ use tracing::info;
 
 use crate::{
     Blockchain, BlockyError, Payload, Transaction, address_from_name, address_to_hex, hash_to_hex,
+    transaction_hash,
 };
 
 pub fn build_demo_blockchain(difficulty: u32) -> Result<Blockchain, BlockyError> {
@@ -53,7 +54,7 @@ pub fn render_chain(blockchain: &Blockchain) -> String {
             continue;
         }
 
-        for transaction in &block.transactions {
+        for (tx_index, transaction) in block.transactions.iter().enumerate() {
             let sender = short_address(&transaction.sender);
             let details = match &transaction.payload {
                 Payload::Transfer { receiver, amount } => {
@@ -75,10 +76,34 @@ pub fn render_chain(blockchain: &Blockchain) -> String {
                 ),
             };
             output.push_str(&format!("    {details} @ {}\n", transaction.timestamp));
+
+            if let Some(block_receipts) = blockchain.receipts.get(index.saturating_sub(1))
+                && let Some(receipt) = block_receipts.get(tx_index)
+            {
+                output.push_str(&format!(
+                    "      receipt {} success={} gas={}\n",
+                    short_hash(&receipt.tx_hash),
+                    receipt.success,
+                    receipt.gas_used
+                ));
+                for log in &receipt.logs {
+                    output.push_str(&format!("      log: {log}\n"));
+                }
+                if let Some(error) = &receipt.error {
+                    output.push_str(&format!("      error: {error}\n"));
+                }
+            } else {
+                let tx_hash = transaction_hash(transaction);
+                output.push_str(&format!("      receipt {} pending\n", short_hash(&tx_hash)));
+            }
         }
     }
 
     output
+}
+
+fn short_hash(hash: &[u8; 32]) -> String {
+    hex::encode(hash).chars().take(8).collect()
 }
 
 fn short_address(address: &crate::Address) -> String {

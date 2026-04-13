@@ -132,6 +132,22 @@ impl Repl {
                 let block = self.blockchain.mine_pending()?;
                 info!(nonce = block.nonce, "mined pending transactions");
                 self.push_output(format!("Mined block with nonce {}.", block.nonce));
+                if let Some(receipts) = self.blockchain.receipts.last().cloned() {
+                    for receipt in receipts {
+                        self.push_output(format!(
+                            "Receipt {} success={} gas={}",
+                            short_hash(&receipt.tx_hash),
+                            receipt.success,
+                            receipt.gas_used
+                        ));
+                        for log in receipt.logs {
+                            self.push_output(format!("  log: {log}"));
+                        }
+                        if let Some(error) = receipt.error {
+                            self.push_output(format!("  error: {error}"));
+                        }
+                    }
+                }
                 Ok(false)
             }
             ReplCommand::Print => {
@@ -466,6 +482,10 @@ pub fn parse_command(line: &str) -> Result<ReplCommand, ReplError> {
 fn short_address(address: &crate::Address) -> String {
     let hex = address_to_hex(address);
     hex.chars().take(8).collect()
+}
+
+fn short_hash(hash: &[u8; 32]) -> String {
+    hex::encode(hash).chars().take(8).collect()
 }
 
 fn tokenize(line: &str) -> Result<Vec<String>, ReplError> {

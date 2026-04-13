@@ -115,22 +115,23 @@ impl Blockchain {
             .map(Block::compute_hash)
             .unwrap_or([0_u8; 32]);
         let transactions = std::mem::take(&mut self.pending_transactions);
-        let mut block = Block::new(transactions, prev_hash);
+        let mut block = Block::new(transactions.clone(), prev_hash);
         block.mine(self.difficulty);
+
+        let mut working_state = self.state.clone();
         let mut receipts = Vec::with_capacity(block.transactions.len());
         for transaction in &block.transactions {
-            match self
-                .state
-                .apply_transaction_with_vm(transaction, Some(&mut self.vm))
-            {
+            match working_state.apply_transaction_with_vm(transaction, Some(&mut self.vm)) {
                 Ok(context) => receipts.push(Receipt::success(transaction, context.logs)),
                 Err(error) => {
                     receipts.push(Receipt::failure(transaction, error.to_string()));
-                    self.receipts.push(receipts);
+                    self.pending_transactions = transactions;
                     return Err(error.into());
                 }
             }
         }
+
+        self.state = working_state;
         self.chain.push(block.clone());
         self.receipts.push(receipts);
         Ok(block)
@@ -272,20 +273,19 @@ mod tests {
         let contract = deploy.derived_contract_address();
 
         chain.credit_balance(alice, 10);
-        chain.add_transaction(deploy).unwrap();
-        chain
-            .add_transaction(Transaction {
-                sender: alice,
-                nonce: 1,
-                payload: Payload::Call {
-                    contract,
-                    method: "missing".to_string(),
-                    args: Vec::new(),
-                    deposit: 2,
-                },
-                timestamp: 1,
-            })
-            .unwrap();
+        chain.add_transaction(deploy.clone()).unwrap();
+        let failing_call = Transaction {
+            sender: alice,
+            nonce: 1,
+            payload: Payload::Call {
+                contract,
+                method: "missing".to_string(),
+                args: Vec::new(),
+                deposit: 2,
+            },
+            timestamp: 1,
+        };
+        chain.add_transaction(failing_call.clone()).unwrap();
 
         let error = chain.mine_pending().unwrap_err();
 
@@ -293,17 +293,9 @@ mod tests {
             error,
             BlockyError::State(crate::StateError::Vm(_))
         ));
-        assert_eq!(chain.receipts.len(), 1);
-        assert_eq!(chain.receipts[0].len(), 2);
-        assert!(chain.receipts[0][0].success);
-        assert!(!chain.receipts[0][1].success);
-        assert!(
-            chain.receipts[0][1]
-                .error
-                .as_deref()
-                .unwrap_or_default()
-                .contains("contract method not found")
-        );
-        assert_eq!(chain.state.get_balance(&contract), 0);
+        assert!(chain.receipts.is_empty());
+        assert_eq!(chain.chain.len(), 1);
+        assert!(chain.state.get_account(&contract).is_none());
+        assert_eq!(chain.pending_transactions, vec![deploy, failing_call]);
     }
 }
