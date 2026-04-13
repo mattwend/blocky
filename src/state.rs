@@ -97,6 +97,14 @@ impl WorldState {
     }
 
     pub fn apply_transaction(&mut self, transaction: &Transaction) -> Result<(), StateError> {
+        self.apply_transaction_with_vm(transaction, None)
+    }
+
+    pub fn apply_transaction_with_vm(
+        &mut self,
+        transaction: &Transaction,
+        mut vm: Option<&mut crate::VmEngine>,
+    ) -> Result<(), StateError> {
         let sender = transaction.sender;
         let expected_nonce = self
             .get_account(&sender)
@@ -121,16 +129,35 @@ impl WorldState {
                 self.get_or_create(&contract).code = Some(code.clone());
             }
             Payload::Call {
-                contract, deposit, ..
+                contract,
+                method,
+                deposit,
+                ..
             } => {
-                let contract_account = self.get_account(contract);
-                let has_code = contract_account
+                let code = self
+                    .get_account(contract)
                     .and_then(|account| account.code.as_ref())
-                    .is_some();
-                if !has_code {
-                    return Err(StateError::ContractCodeMissing);
+                    .cloned()
+                    .ok_or(StateError::ContractCodeMissing)?;
+
+                let mut working_state = self.clone();
+                working_state.transfer(&sender, contract, *deposit)?;
+
+                if let Some(vm) = vm.as_deref_mut() {
+                    let (next_state, _context) = vm
+                        .execute_call_with_state(
+                            working_state,
+                            sender,
+                            *contract,
+                            *deposit,
+                            method,
+                            &code,
+                        )
+                        .map_err(|_| StateError::ContractCodeMissing)?;
+                    *self = next_state;
+                } else {
+                    *self = working_state;
                 }
-                self.transfer(&sender, contract, *deposit)?;
             }
         }
 

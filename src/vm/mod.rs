@@ -2,9 +2,9 @@ use std::{collections::HashMap, sync::Arc};
 
 use sha2::{Digest, Sha256};
 use thiserror::Error;
-use wasmtime::{Config, Engine, Linker, Module};
+use wasmtime::{Config, Engine, Linker, Module, Store};
 
-use crate::Hash;
+use crate::{Address, Hash};
 
 pub mod host;
 
@@ -22,6 +22,10 @@ pub enum VmError {
     EngineConfig(#[from] wasmtime::Error),
     #[error(transparent)]
     Host(#[from] host::HostError),
+    #[error("contract method not found: {0}")]
+    MissingMethod(String),
+    #[error("contract execution aborted")]
+    Aborted,
 }
 
 impl VmEngine {
@@ -63,6 +67,78 @@ impl VmEngine {
     pub fn get_cached_module(&self, code_hash: &Hash) -> Option<Arc<Module>> {
         self.module_cache.get(code_hash).cloned()
     }
+
+    pub fn prepare_module(&mut self, code: &[u8]) -> Result<Arc<Module>, VmError> {
+        let code_hash = self.cache_module(code)?;
+        self.get_cached_module(&code_hash)
+            .ok_or_else(|| VmError::EngineConfig(wasmtime::Error::msg("cached module missing")))
+    }
+
+    pub fn execute_call(
+        &mut self,
+        state: crate::WorldState,
+        caller: Address,
+        contract: Address,
+        deposit: u64,
+        method: &str,
+        code: &[u8],
+    ) -> Result<ExecutionContext, VmError> {
+        let module = self.prepare_module(code)?;
+        let host_state = VmHostState {
+            state,
+            context: Some(ExecutionContext::new(caller, contract, deposit)),
+        };
+        let mut store = Store::new(&self.engine, host_state);
+        store.set_fuel(1_000_000)?;
+        let instance = self.linker.instantiate(&mut store, &module)?;
+        let function = instance
+            .get_func(&mut store, method)
+            .ok_or_else(|| VmError::MissingMethod(method.to_string()))?;
+        function.call(&mut store, &[], &mut [])?;
+
+        let host_state = store.into_data();
+        let context = host_state
+            .context
+            .ok_or(VmError::Host(HostError::MissingContext))?;
+        if context.reverted {
+            return Err(VmError::Aborted);
+        }
+
+        Ok(context)
+    }
+
+    pub fn execute_call_with_state(
+        &mut self,
+        state: crate::WorldState,
+        caller: Address,
+        contract: Address,
+        deposit: u64,
+        method: &str,
+        code: &[u8],
+    ) -> Result<(crate::WorldState, ExecutionContext), VmError> {
+        let module = self.prepare_module(code)?;
+        let host_state = VmHostState {
+            state,
+            context: Some(ExecutionContext::new(caller, contract, deposit)),
+        };
+        let mut store = Store::new(&self.engine, host_state);
+        store.set_fuel(1_000_000)?;
+        let instance = self.linker.instantiate(&mut store, &module)?;
+        let function = instance
+            .get_func(&mut store, method)
+            .ok_or_else(|| VmError::MissingMethod(method.to_string()))?;
+        function.call(&mut store, &[], &mut [])?;
+
+        let host_state = store.into_data();
+        let context = host_state
+            .context
+            .ok_or(VmError::Host(HostError::MissingContext))?;
+        if context.reverted {
+            return Err(VmError::Aborted);
+        }
+
+        Ok((host_state.state, context))
+    }
 }
 
 fn deterministic_config() -> Result<Config, wasmtime::Error> {
@@ -91,8 +167,14 @@ pub fn code_hash(code: &[u8]) -> Hash {
 #[cfg(test)]
 mod tests {
     use super::{VmEngine, code_hash};
+    use crate::transaction::address_from_name;
 
     const EMPTY_MODULE: &[u8] = &[0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
+    const NOOP_MODULE: &[u8] = &[
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03,
+        0x02, 0x01, 0x00, 0x07, 0x08, 0x01, 0x04, 0x6e, 0x6f, 0x6f, 0x70, 0x00, 0x00, 0x0a, 0x04,
+        0x01, 0x02, 0x00, 0x0b,
+    ];
 
     #[test]
     fn code_hash_is_deterministic() {
@@ -109,5 +191,27 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(vm.module_cache_len(), 1);
         assert!(vm.get_cached_module(&first).is_some());
+    }
+
+    #[test]
+    fn executes_exported_method() {
+        let mut vm = VmEngine::new().unwrap();
+        let caller = address_from_name("alice");
+        let contract = address_from_name("contract");
+
+        let (_, context) = vm
+            .execute_call_with_state(
+                crate::WorldState::new(),
+                caller,
+                contract,
+                0,
+                "noop",
+                NOOP_MODULE,
+            )
+            .unwrap();
+
+        assert_eq!(context.caller, caller);
+        assert_eq!(context.contract, contract);
+        assert!(context.logs.is_empty());
     }
 }

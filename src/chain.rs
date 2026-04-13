@@ -115,7 +115,10 @@ impl Blockchain {
         let transactions = std::mem::take(&mut self.pending_transactions);
         let mut block = Block::new(transactions, prev_hash);
         block.mine(self.difficulty);
-        self.state.apply_block(&block)?;
+        for transaction in &block.transactions {
+            self.state
+                .apply_transaction_with_vm(transaction, Some(&mut self.vm))?;
+        }
         self.chain.push(block.clone());
         Ok(block)
     }
