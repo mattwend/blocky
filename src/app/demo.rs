@@ -6,7 +6,7 @@ use crate::{
 };
 
 pub fn build_demo_blockchain(difficulty: u32) -> Result<Blockchain, BlockyError> {
-    let mut blockchain = Blockchain::new(difficulty);
+    let mut blockchain = Blockchain::try_new(difficulty)?;
     info!(difficulty, "initialized demo blockchain");
 
     let alice = address_from_name("alice");

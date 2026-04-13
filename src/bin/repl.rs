@@ -14,7 +14,7 @@ fn main() {
 }
 
 fn run() -> Result<(), ReplError> {
-    let mut repl = Repl::new(8);
+    let mut repl = Repl::try_new(8)?;
     repl.run()
 }
 

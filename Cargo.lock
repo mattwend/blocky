@@ -105,6 +105,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "blocky-sdk"
+version = "0.1.0"
+dependencies = [
+ "borsh",
+]
+
+[[package]]
 name = "borsh"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

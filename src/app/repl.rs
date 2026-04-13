@@ -64,9 +64,9 @@ pub struct Repl {
 }
 
 impl Repl {
-    pub fn new(difficulty: u32) -> Self {
-        Self {
-            blockchain: Blockchain::new(difficulty),
+    pub fn try_new(difficulty: u32) -> Result<Self, ReplError> {
+        Ok(Self {
+            blockchain: Blockchain::try_new(difficulty)?,
             input: String::new(),
             output: vec![
                 "Welcome to Blocky REPL".to_string(),
@@ -75,7 +75,7 @@ impl Repl {
             scroll_offset: 0,
             history: Vec::new(),
             history_index: None,
-        }
+        })
     }
 
     pub fn run(&mut self) -> Result<(), ReplError> {
@@ -566,7 +566,7 @@ mod tests {
 
     #[test]
     fn repl_can_execute_happy_path() {
-        let mut repl = Repl::new(4);
+        let mut repl = Repl::try_new(4).unwrap();
         repl.blockchain
             .credit_balance(crate::address_from_name("alice"), 5);
 
