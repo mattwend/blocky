@@ -121,7 +121,7 @@ impl WorldState {
             });
         }
 
-        let mut context = ExecutionContext::new(sender, sender, 0);
+        let mut context = ExecutionContext::new(sender, sender, 0, Vec::new());
 
         match &transaction.payload {
             Payload::Transfer { receiver, amount } => {
@@ -137,8 +137,8 @@ impl WorldState {
             Payload::Call {
                 contract,
                 method,
+                args,
                 deposit,
-                ..
             } => {
                 let code = self
                     .get_account(contract)
@@ -156,13 +156,14 @@ impl WorldState {
                         *contract,
                         *deposit,
                         method,
+                        args,
                         &code,
                     )?;
                     *self = next_state;
                     context = vm_context;
                 } else {
                     *self = working_state;
-                    context = ExecutionContext::new(sender, *contract, *deposit);
+                    context = ExecutionContext::new(sender, *contract, *deposit, args.clone());
                 }
             }
         }

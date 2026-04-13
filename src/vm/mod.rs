@@ -1,5 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
+use anyhow::Error as AnyhowError;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use wasmtime::{Config, Engine, Linker, Module, Store};
@@ -26,6 +27,8 @@ pub enum VmError {
     MissingMethod(String),
     #[error("contract execution aborted")]
     Aborted,
+    #[error("contract execution aborted: {0}")]
+    AbortedWithMessage(String),
 }
 
 impl VmEngine {
@@ -81,12 +84,18 @@ impl VmEngine {
         contract: Address,
         deposit: u64,
         method: &str,
+        args: &[u8],
         code: &[u8],
     ) -> Result<ExecutionContext, VmError> {
         let module = self.prepare_module(code)?;
         let host_state = VmHostState {
             state,
-            context: Some(ExecutionContext::new(caller, contract, deposit)),
+            context: Some(ExecutionContext::new(
+                caller,
+                contract,
+                deposit,
+                args.to_vec(),
+            )),
         };
         let mut store = Store::new(&self.engine, host_state);
         store.set_fuel(1_000_000)?;
@@ -94,14 +103,28 @@ impl VmEngine {
         let function = instance
             .get_func(&mut store, method)
             .ok_or_else(|| VmError::MissingMethod(method.to_string()))?;
-        function.call(&mut store, &[], &mut [])?;
+        if let Err(error) = function.call(&mut store, &[], &mut []) {
+            let message = store
+                .data()
+                .context
+                .as_ref()
+                .and_then(|context| context.revert_message.clone())
+                .or_else(|| extract_error_message(&error));
+            return Err(match message {
+                Some(message) => VmError::AbortedWithMessage(message),
+                None => VmError::EngineConfig(error),
+            });
+        }
 
         let host_state = store.into_data();
         let context = host_state
             .context
             .ok_or(VmError::Host(HostError::MissingContext))?;
         if context.reverted {
-            return Err(VmError::Aborted);
+            return match context.revert_message {
+                Some(message) => Err(VmError::AbortedWithMessage(message)),
+                None => Err(VmError::Aborted),
+            };
         }
 
         Ok(context)
@@ -114,12 +137,18 @@ impl VmEngine {
         contract: Address,
         deposit: u64,
         method: &str,
+        args: &[u8],
         code: &[u8],
     ) -> Result<(crate::WorldState, ExecutionContext), VmError> {
         let module = self.prepare_module(code)?;
         let host_state = VmHostState {
             state,
-            context: Some(ExecutionContext::new(caller, contract, deposit)),
+            context: Some(ExecutionContext::new(
+                caller,
+                contract,
+                deposit,
+                args.to_vec(),
+            )),
         };
         let mut store = Store::new(&self.engine, host_state);
         store.set_fuel(1_000_000)?;
@@ -127,14 +156,28 @@ impl VmEngine {
         let function = instance
             .get_func(&mut store, method)
             .ok_or_else(|| VmError::MissingMethod(method.to_string()))?;
-        function.call(&mut store, &[], &mut [])?;
+        if let Err(error) = function.call(&mut store, &[], &mut []) {
+            let message = store
+                .data()
+                .context
+                .as_ref()
+                .and_then(|context| context.revert_message.clone())
+                .or_else(|| extract_error_message(&error));
+            return Err(match message {
+                Some(message) => VmError::AbortedWithMessage(message),
+                None => VmError::EngineConfig(error),
+            });
+        }
 
         let host_state = store.into_data();
         let context = host_state
             .context
             .ok_or(VmError::Host(HostError::MissingContext))?;
         if context.reverted {
-            return Err(VmError::Aborted);
+            return match context.revert_message {
+                Some(message) => Err(VmError::AbortedWithMessage(message)),
+                None => Err(VmError::Aborted),
+            };
         }
 
         Ok((host_state.state, context))
@@ -155,6 +198,10 @@ fn deterministic_config() -> Result<Config, wasmtime::Error> {
     config.consume_fuel(true);
     config.cranelift_nan_canonicalization(true);
     Ok(config)
+}
+
+fn extract_error_message(error: &wasmtime::Error) -> Option<String> {
+    error.downcast_ref::<AnyhowError>().map(ToString::to_string)
 }
 
 pub fn code_hash(code: &[u8]) -> Hash {
@@ -206,12 +253,14 @@ mod tests {
                 contract,
                 0,
                 "noop",
+                &[],
                 NOOP_MODULE,
             )
             .unwrap();
 
         assert_eq!(context.caller, caller);
         assert_eq!(context.contract, contract);
+        assert!(context.args.is_empty());
         assert!(context.logs.is_empty());
     }
 }

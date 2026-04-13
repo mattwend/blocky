@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use thiserror::Error;
 use wasmtime::{Caller, Linker, Memory};
 
@@ -8,17 +9,19 @@ pub struct ExecutionContext {
     pub caller: Address,
     pub contract: Address,
     pub deposit: u64,
+    pub args: Vec<u8>,
     pub reverted: bool,
     pub revert_message: Option<String>,
     pub logs: Vec<String>,
 }
 
 impl ExecutionContext {
-    pub fn new(caller: Address, contract: Address, deposit: u64) -> Self {
+    pub fn new(caller: Address, contract: Address, deposit: u64, args: Vec<u8>) -> Self {
         Self {
             caller,
             contract,
             deposit,
+            args,
             reverted: false,
             revert_message: None,
             logs: Vec::new(),
@@ -113,6 +116,21 @@ pub fn link_host_functions(linker: &mut Linker<VmHostState>) -> Result<(), wasmt
     )?;
     linker.func_wrap(
         "env",
+        "input_len",
+        |caller: Caller<'_, VmHostState>| -> i32 { input_len(&caller).unwrap_or(-1) },
+    )?;
+    linker.func_wrap(
+        "env",
+        "read_input",
+        |mut caller: Caller<'_, VmHostState>, out_ptr: i32| -> i32 {
+            match read_input(&mut caller, out_ptr) {
+                Ok(length) => length as i32,
+                Err(_) => -1,
+            }
+        },
+    )?;
+    linker.func_wrap(
+        "env",
         "log",
         |mut caller: Caller<'_, VmHostState>, msg_ptr: i32, msg_len: i32| {
             if let Ok(message_bytes) = read_memory(&mut caller, msg_ptr, msg_len) {
@@ -126,14 +144,21 @@ pub fn link_host_functions(linker: &mut Linker<VmHostState>) -> Result<(), wasmt
     linker.func_wrap(
         "env",
         "abort",
-        |mut caller: Caller<'_, VmHostState>, msg_ptr: i32, msg_len: i32| {
-            if let Ok(message_bytes) = read_memory(&mut caller, msg_ptr, msg_len) {
-                let message = String::from_utf8_lossy(&message_bytes).into_owned();
-                if let Some(context) = caller.data_mut().context.as_mut() {
-                    context.reverted = true;
-                    context.revert_message = Some(message);
-                }
+        |mut caller: Caller<'_, VmHostState>,
+         msg_ptr: i32,
+         msg_len: i32|
+         -> Result<(), wasmtime::Error> {
+            let message = match read_memory(&mut caller, msg_ptr, msg_len) {
+                Ok(message_bytes) => String::from_utf8_lossy(&message_bytes).into_owned(),
+                Err(error) => error.to_string(),
+            };
+
+            if let Some(context) = caller.data_mut().context.as_mut() {
+                context.reverted = true;
+                context.revert_message = Some(message.clone());
             }
+
+            Err(anyhow!(message).into())
         },
     )?;
     Ok(())
@@ -222,6 +247,17 @@ pub fn transfer(
     let from = execution_context(caller)?.contract;
     caller.data_mut().state.transfer(&from, &to, amount)?;
     Ok(())
+}
+
+pub fn input_len(caller: &Caller<'_, VmHostState>) -> Result<i32, HostError> {
+    let len = execution_context(caller)?.args.len();
+    i32::try_from(len).map_err(|_| HostError::OutOfBounds)
+}
+
+pub fn read_input(caller: &mut Caller<'_, VmHostState>, out_ptr: i32) -> Result<usize, HostError> {
+    let args = execution_context(caller)?.args.clone();
+    write_memory(caller, out_ptr, &args)?;
+    Ok(args.len())
 }
 
 fn execution_context<'a>(
@@ -319,11 +355,12 @@ mod tests {
     fn execution_context_initializes_cleanly() {
         let caller = address_from_name("alice");
         let contract = address_from_name("contract");
-        let context = ExecutionContext::new(caller, contract, 7);
+        let context = ExecutionContext::new(caller, contract, 7, vec![1, 2, 3]);
 
         assert_eq!(context.caller, caller);
         assert_eq!(context.contract, contract);
         assert_eq!(context.deposit, 7);
+        assert_eq!(context.args, vec![1, 2, 3]);
         assert!(!context.reverted);
         assert!(context.revert_message.is_none());
         assert!(context.logs.is_empty());
