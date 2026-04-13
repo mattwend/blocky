@@ -292,7 +292,8 @@ impl From<crate::StateError> for HostError {
             crate::StateError::InsufficientBalance { .. } => HostError::Aborted,
             crate::StateError::InvalidNonce { .. }
             | crate::StateError::ContractAlreadyExists
-            | crate::StateError::ContractCodeMissing => HostError::Aborted,
+            | crate::StateError::ContractCodeMissing
+            | crate::StateError::Vm(_) => HostError::Aborted,
         }
     }
 }

@@ -3,8 +3,9 @@ use std::collections::{BTreeMap, HashMap};
 use thiserror::Error;
 
 use crate::{
-    Address, Block,
+    Address, Block, ExecutionContext,
     transaction::{Payload, Transaction},
+    vm::VmError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,7 +27,7 @@ impl Default for AccountState {
     }
 }
 
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[derive(Debug, Error)]
 pub enum StateError {
     #[error("insufficient balance: available {available}, required {required}")]
     InsufficientBalance { available: u64, required: u64 },
@@ -36,6 +37,8 @@ pub enum StateError {
     ContractAlreadyExists,
     #[error("contract call target has no code")]
     ContractCodeMissing,
+    #[error(transparent)]
+    Vm(#[from] VmError),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -98,13 +101,14 @@ impl WorldState {
 
     pub fn apply_transaction(&mut self, transaction: &Transaction) -> Result<(), StateError> {
         self.apply_transaction_with_vm(transaction, None)
+            .map(|_| ())
     }
 
     pub fn apply_transaction_with_vm(
         &mut self,
         transaction: &Transaction,
         mut vm: Option<&mut crate::VmEngine>,
-    ) -> Result<(), StateError> {
+    ) -> Result<ExecutionContext, StateError> {
         let sender = transaction.sender;
         let expected_nonce = self
             .get_account(&sender)
@@ -116,6 +120,8 @@ impl WorldState {
                 got: transaction.nonce,
             });
         }
+
+        let mut context = ExecutionContext::new(sender, sender, 0);
 
         match &transaction.payload {
             Payload::Transfer { receiver, amount } => {
@@ -144,25 +150,25 @@ impl WorldState {
                 working_state.transfer(&sender, contract, *deposit)?;
 
                 if let Some(vm) = vm.as_deref_mut() {
-                    let (next_state, _context) = vm
-                        .execute_call_with_state(
-                            working_state,
-                            sender,
-                            *contract,
-                            *deposit,
-                            method,
-                            &code,
-                        )
-                        .map_err(|_| StateError::ContractCodeMissing)?;
+                    let (next_state, vm_context) = vm.execute_call_with_state(
+                        working_state,
+                        sender,
+                        *contract,
+                        *deposit,
+                        method,
+                        &code,
+                    )?;
                     *self = next_state;
+                    context = vm_context;
                 } else {
                     *self = working_state;
+                    context = ExecutionContext::new(sender, *contract, *deposit);
                 }
             }
         }
 
         self.get_or_create(&sender).nonce += 1;
-        Ok(())
+        Ok(context)
     }
 }
 
@@ -203,13 +209,13 @@ mod tests {
             })
             .unwrap_err();
 
-        assert_eq!(
+        assert!(matches!(
             error,
             StateError::InvalidNonce {
                 expected: 0,
                 got: 7,
             }
-        );
+        ));
     }
 
     #[test]

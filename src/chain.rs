@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 use crate::{
-    Address, Transaction, VmEngine, WorldState,
+    Address, Receipt, Transaction, VmEngine, WorldState,
     block::{Block, Hash, hash_meets_difficulty},
     state::StateError,
     transaction::Payload,
@@ -28,6 +28,7 @@ pub struct Blockchain {
     pub difficulty: u32,
     pub state: WorldState,
     pub vm: VmEngine,
+    pub receipts: Vec<Vec<Receipt>>,
 }
 
 impl Blockchain {
@@ -48,6 +49,7 @@ impl Blockchain {
             difficulty,
             state: WorldState::new(),
             vm: VmEngine::new()?,
+            receipts: Vec::new(),
         })
     }
 
@@ -115,11 +117,22 @@ impl Blockchain {
         let transactions = std::mem::take(&mut self.pending_transactions);
         let mut block = Block::new(transactions, prev_hash);
         block.mine(self.difficulty);
+        let mut receipts = Vec::with_capacity(block.transactions.len());
         for transaction in &block.transactions {
-            self.state
-                .apply_transaction_with_vm(transaction, Some(&mut self.vm))?;
+            match self
+                .state
+                .apply_transaction_with_vm(transaction, Some(&mut self.vm))
+            {
+                Ok(context) => receipts.push(Receipt::success(transaction, context.logs)),
+                Err(error) => {
+                    receipts.push(Receipt::failure(transaction, error.to_string()));
+                    self.receipts.push(receipts);
+                    return Err(error.into());
+                }
+            }
         }
         self.chain.push(block.clone());
+        self.receipts.push(receipts);
         Ok(block)
     }
 
@@ -155,8 +168,15 @@ impl Blockchain {
 
 #[cfg(test)]
 mod tests {
-    use super::Blockchain;
-    use crate::transaction::{Transaction, address_from_name};
+    use super::{Blockchain, BlockyError};
+    use crate::transaction::{Payload, Transaction, address_from_name};
+
+    const EMPTY_MODULE: &[u8] = &[0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
+    const NOOP_MODULE: &[u8] = &[
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03,
+        0x02, 0x01, 0x00, 0x07, 0x08, 0x01, 0x04, 0x6e, 0x6f, 0x6f, 0x70, 0x00, 0x00, 0x0a, 0x04,
+        0x01, 0x02, 0x00, 0x0b,
+    ];
 
     #[test]
     fn genesis_block_has_zero_prev_hash() {
@@ -214,5 +234,76 @@ mod tests {
         }
 
         assert!(!chain.is_valid());
+    }
+
+    #[test]
+    fn mine_pending_records_success_receipts() {
+        let mut chain = Blockchain::new(4);
+        let alice = address_from_name("alice");
+        let deploy = Transaction::new_deploy(alice, 0, NOOP_MODULE.to_vec());
+        let contract = deploy.derived_contract_address();
+
+        chain.credit_balance(alice, 10);
+        chain.add_transaction(deploy).unwrap();
+        chain
+            .add_transaction(Transaction::new_call(
+                alice,
+                1,
+                contract,
+                "noop",
+                Vec::new(),
+                3,
+            ))
+            .unwrap();
+
+        chain.mine_pending().unwrap();
+
+        assert_eq!(chain.receipts.len(), 1);
+        assert_eq!(chain.receipts[0].len(), 2);
+        assert!(chain.receipts[0].iter().all(|receipt| receipt.success));
+        assert_eq!(chain.state.get_balance(&contract), 3);
+    }
+
+    #[test]
+    fn mine_pending_records_failure_receipt_for_vm_errors() {
+        let mut chain = Blockchain::new(4);
+        let alice = address_from_name("alice");
+        let deploy = Transaction::new_deploy(alice, 0, EMPTY_MODULE.to_vec());
+        let contract = deploy.derived_contract_address();
+
+        chain.credit_balance(alice, 10);
+        chain.add_transaction(deploy).unwrap();
+        chain
+            .add_transaction(Transaction {
+                sender: alice,
+                nonce: 1,
+                payload: Payload::Call {
+                    contract,
+                    method: "missing".to_string(),
+                    args: Vec::new(),
+                    deposit: 2,
+                },
+                timestamp: 1,
+            })
+            .unwrap();
+
+        let error = chain.mine_pending().unwrap_err();
+
+        assert!(matches!(
+            error,
+            BlockyError::State(crate::StateError::Vm(_))
+        ));
+        assert_eq!(chain.receipts.len(), 1);
+        assert_eq!(chain.receipts[0].len(), 2);
+        assert!(chain.receipts[0][0].success);
+        assert!(!chain.receipts[0][1].success);
+        assert!(
+            chain.receipts[0][1]
+                .error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("contract method not found")
+        );
+        assert_eq!(chain.state.get_balance(&contract), 0);
     }
 }
