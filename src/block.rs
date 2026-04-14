@@ -44,7 +44,8 @@ impl Block {
     /// The SHA-256 digest for this block, or an error if transaction serialization fails.
     pub fn compute_hash(&self) -> Result<Hash, BlockyError> {
         let serialized_transactions = serde_json::to_string(&self.transactions)
-            .map_err(BlockyError::BlockHashSerialization)?;
+            .map_err(std::io::Error::other)
+            .map_err(BlockyError::HashSerialization)?;
         let input = format!(
             "{}{}{}{}",
             self.timestamp,

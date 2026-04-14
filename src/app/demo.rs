@@ -93,7 +93,7 @@ pub fn render_chain(blockchain: &Blockchain) -> Result<String, BlockyError> {
                     output.push_str(&format!("      error: {error}\n"));
                 }
             } else {
-                let tx_hash = transaction_hash(transaction);
+                let tx_hash = transaction_hash(transaction)?;
                 output.push_str(&format!("      receipt {} pending\n", short_hash(&tx_hash)));
             }
         }

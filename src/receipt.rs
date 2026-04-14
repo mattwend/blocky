@@ -2,7 +2,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::transaction::Transaction;
+use crate::{chain::BlockyError, transaction::Transaction};
 
 #[derive(Debug, Clone, Serialize, Deserialize, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
 pub struct Receipt {
@@ -23,14 +23,18 @@ impl Receipt {
     ///
     /// # Returns
     /// A receipt marked as successful.
-    pub fn success(transaction: &Transaction, gas_used: u64, logs: Vec<String>) -> Self {
-        Self {
-            tx_hash: transaction_hash(transaction),
+    pub fn success(
+        transaction: &Transaction,
+        gas_used: u64,
+        logs: Vec<String>,
+    ) -> Result<Self, BlockyError> {
+        Ok(Self {
+            tx_hash: transaction_hash(transaction)?,
             success: true,
             gas_used,
             logs,
             error: None,
-        }
+        })
     }
 
     /// Creates a failed receipt for a transaction.
@@ -42,14 +46,18 @@ impl Receipt {
     ///
     /// # Returns
     /// A receipt marked as failed.
-    pub fn failure(transaction: &Transaction, gas_used: u64, error: impl Into<String>) -> Self {
-        Self {
-            tx_hash: transaction_hash(transaction),
+    pub fn failure(
+        transaction: &Transaction,
+        gas_used: u64,
+        error: impl Into<String>,
+    ) -> Result<Self, BlockyError> {
+        Ok(Self {
+            tx_hash: transaction_hash(transaction)?,
             success: false,
             gas_used,
             logs: Vec::new(),
             error: Some(error.into()),
-        }
+        })
     }
 }
 
@@ -60,13 +68,12 @@ impl Receipt {
 ///
 /// # Returns
 /// A 32-byte SHA-256 digest of the transaction's Borsh encoding.
-pub fn transaction_hash(transaction: &Transaction) -> [u8; 32] {
-    let bytes = borsh::to_vec(transaction)
-        .expect("borsh serialization of a fully-owned Transaction should not fail");
+pub fn transaction_hash(transaction: &Transaction) -> Result<[u8; 32], BlockyError> {
+    let bytes = borsh::to_vec(transaction).map_err(BlockyError::HashSerialization)?;
     let digest = Sha256::digest(bytes);
     let mut hash = [0_u8; 32];
     hash.copy_from_slice(&digest);
-    hash
+    Ok(hash)
 }
 
 #[cfg(test)]
@@ -78,14 +85,17 @@ mod tests {
     fn transaction_hash_is_deterministic() {
         let tx =
             Transaction::new_transfer(address_from_name("alice"), 0, address_from_name("bob"), 5);
-        assert_eq!(transaction_hash(&tx), transaction_hash(&tx));
+        assert_eq!(
+            transaction_hash(&tx).unwrap(),
+            transaction_hash(&tx).unwrap()
+        );
     }
 
     #[test]
     fn success_receipt_captures_logs() {
         let tx =
             Transaction::new_transfer(address_from_name("alice"), 0, address_from_name("bob"), 5);
-        let receipt = Receipt::success(&tx, 77, vec!["hello".to_string()]);
+        let receipt = Receipt::success(&tx, 77, vec!["hello".to_string()]).unwrap();
 
         assert!(receipt.success);
         assert_eq!(receipt.gas_used, 77);

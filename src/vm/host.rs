@@ -1,5 +1,6 @@
 use anyhow::anyhow;
 use thiserror::Error;
+use tracing::warn;
 use wasmtime::{Caller, Linker, Memory};
 
 use crate::{Address, WorldState};
@@ -69,6 +70,8 @@ pub enum HostError {
     OutOfBounds,
     #[error("execution context is missing")]
     MissingContext,
+    #[error("state operation failed: {0}")]
+    State(String),
     #[error("failed to charge gas: {0}")]
     Gas(String),
 }
@@ -84,12 +87,14 @@ pub fn link_host_functions(linker: &mut Linker<VmHostState>) -> Result<(), wasmt
     linker.func_wrap(
         "env",
         "storage_read",
-        |mut caller: Caller<'_, VmHostState>, key_ptr: i32, key_len: i32, val_ptr: i32| -> i32 {
-            match storage_read(&mut caller, key_ptr, key_len, val_ptr) {
-                Ok(Some(length)) => length as i32,
-                Ok(None) => -1,
-                Err(_) => -1,
-            }
+        |mut caller: Caller<'_, VmHostState>,
+         key_ptr: i32,
+         key_len: i32,
+         val_ptr: i32|
+         -> Result<i32, wasmtime::Error> {
+            storage_read(&mut caller, key_ptr, key_len, val_ptr)
+                .map(|result| result.map_or(-1, |length| length as i32))
+                .map_err(host_trap)
         },
     )?;
     linker.func_wrap(
@@ -99,77 +104,97 @@ pub fn link_host_functions(linker: &mut Linker<VmHostState>) -> Result<(), wasmt
          key_ptr: i32,
          key_len: i32,
          val_ptr: i32,
-         val_len: i32| {
-            let _ = storage_write(&mut caller, key_ptr, key_len, val_ptr, val_len);
+         val_len: i32|
+         -> Result<(), wasmtime::Error> {
+            storage_write(&mut caller, key_ptr, key_len, val_ptr, val_len).map_err(host_trap)
         },
     )?;
     linker.func_wrap(
         "env",
         "storage_remove",
-        |mut caller: Caller<'_, VmHostState>, key_ptr: i32, key_len: i32| -> i32 {
-            match storage_remove(&mut caller, key_ptr, key_len) {
-                Ok(true) => 1,
-                Ok(false) => 0,
-                Err(_) => 0,
-            }
+        |mut caller: Caller<'_, VmHostState>,
+         key_ptr: i32,
+         key_len: i32|
+         -> Result<i32, wasmtime::Error> {
+            storage_remove(&mut caller, key_ptr, key_len)
+                .map(|removed| if removed { 1 } else { 0 })
+                .map_err(host_trap)
         },
     )?;
     linker.func_wrap(
         "env",
         "get_balance",
-        |caller: Caller<'_, VmHostState>| -> i64 {
-            get_balance(&caller).unwrap_or_default() as i64
+        |caller: Caller<'_, VmHostState>| -> Result<i64, wasmtime::Error> {
+            get_balance(&caller)
+                .map(|balance| balance as i64)
+                .map_err(host_trap)
         },
     )?;
     linker.func_wrap(
         "env",
         "get_caller",
-        |mut caller: Caller<'_, VmHostState>, out_ptr: i32| {
-            let _ = get_caller(&mut caller, out_ptr);
+        |mut caller: Caller<'_, VmHostState>, out_ptr: i32| -> Result<(), wasmtime::Error> {
+            get_caller(&mut caller, out_ptr).map_err(host_trap)
         },
     )?;
     linker.func_wrap(
         "env",
         "get_deposit",
-        |caller: Caller<'_, VmHostState>| -> i64 {
-            get_deposit(&caller).unwrap_or_default() as i64
+        |caller: Caller<'_, VmHostState>| -> Result<i64, wasmtime::Error> {
+            get_deposit(&caller)
+                .map(|deposit| deposit as i64)
+                .map_err(host_trap)
         },
     )?;
     linker.func_wrap(
         "env",
         "transfer",
-        |mut caller: Caller<'_, VmHostState>, to_ptr: i32, amount: i64| -> i32 {
-            match transfer(&mut caller, to_ptr, amount as u64) {
-                Ok(()) => 0,
-                Err(_) => 1,
+        |mut caller: Caller<'_, VmHostState>,
+         to_ptr: i32,
+         amount: i64|
+         -> Result<i32, wasmtime::Error> {
+            if amount < 0 {
+                return Err(host_trap(HostError::State(
+                    "transfer amount must be non-negative".to_string(),
+                )));
             }
+            transfer(&mut caller, to_ptr, amount as u64)
+                .map(|()| 0)
+                .map_err(host_trap)
         },
     )?;
     linker.func_wrap(
         "env",
         "input_len",
-        |caller: Caller<'_, VmHostState>| -> i32 { input_len(&caller).unwrap_or(-1) },
+        |caller: Caller<'_, VmHostState>| -> Result<i32, wasmtime::Error> {
+            input_len(&caller).map_err(host_trap)
+        },
     )?;
     linker.func_wrap(
         "env",
         "read_input",
-        |mut caller: Caller<'_, VmHostState>, out_ptr: i32| -> i32 {
-            match read_input(&mut caller, out_ptr) {
-                Ok(length) => length as i32,
-                Err(_) => -1,
-            }
+        |mut caller: Caller<'_, VmHostState>, out_ptr: i32| -> Result<i32, wasmtime::Error> {
+            read_input(&mut caller, out_ptr)
+                .map(|length| length as i32)
+                .map_err(host_trap)
         },
     )?;
     linker.func_wrap(
         "env",
         "log",
-        |mut caller: Caller<'_, VmHostState>, msg_ptr: i32, msg_len: i32| {
-            if let Ok(message_bytes) = read_memory(&mut caller, msg_ptr, msg_len) {
-                let message = String::from_utf8_lossy(&message_bytes).into_owned();
-                if let Some(context) = caller.data_mut().context.as_mut() {
-                    context.logs.push(message);
-                }
-            }
+        |mut caller: Caller<'_, VmHostState>,
+         msg_ptr: i32,
+         msg_len: i32|
+         -> Result<(), wasmtime::Error> {
+            let message_bytes = read_memory(&mut caller, msg_ptr, msg_len).map_err(host_trap)?;
+            let message = String::from_utf8_lossy(&message_bytes).into_owned();
+            let context = caller
+                .data_mut()
+                .context
+                .as_mut()
+                .ok_or_else(|| host_trap(HostError::MissingContext))?;
+            context.logs.push(message);
+            Ok(())
         },
     )?;
     linker.func_wrap(
@@ -345,7 +370,7 @@ pub fn transfer(
         .data_mut()
         .state
         .transfer(&from, &to, amount)
-        .map_err(|error| HostError::Gas(error.to_string()))?;
+        .map_err(|error| HostError::State(error.to_string()))?;
     Ok(())
 }
 
@@ -383,6 +408,11 @@ fn execution_context<'a>(
         .context
         .as_ref()
         .ok_or(HostError::MissingContext)
+}
+
+fn host_trap(error: HostError) -> wasmtime::Error {
+    warn!(error = %error, "vm host function failed");
+    wasmtime::Error::msg(error.to_string())
 }
 
 fn charge_gas(caller: &mut Caller<'_, VmHostState>, amount: u64) -> Result<(), HostError> {

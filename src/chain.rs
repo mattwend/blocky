@@ -16,8 +16,8 @@ use crate::{
 pub enum BlockyError {
     #[error("cannot mine a block without pending transactions")]
     NoPendingTransactions,
-    #[error("failed to serialize block transactions while hashing: {0}")]
-    BlockHashSerialization(#[source] serde_json::Error),
+    #[error("failed to serialize data while hashing: {0}")]
+    HashSerialization(#[source] std::io::Error),
     #[error("sender has insufficient balance: available {available}, required {required}")]
     InsufficientBalance { available: u64, required: u64 },
     #[error("sender nonce mismatch: expected {expected}, got {got}")]
@@ -156,7 +156,7 @@ impl Blockchain {
                     transaction,
                     gas_report.gas_used,
                     context.logs,
-                )),
+                )?),
                 Err(error) => {
                     let gas_used = match &transaction.payload {
                         Payload::Deploy { code } => {
@@ -164,7 +164,7 @@ impl Blockchain {
                         }
                         _ => BASE_TX_COST,
                     };
-                    receipts.push(Receipt::failure(transaction, gas_used, error.to_string()));
+                    receipts.push(Receipt::failure(transaction, gas_used, error.to_string())?);
                     self.receipts.push(receipts);
                     self.pending_transactions = transactions;
                     return Err(error.into());

@@ -34,7 +34,7 @@ mod tests {
     #[test]
     fn round_trips_borsh_encoded_envelope() {
         let envelope = CallEnvelope::new("set", vec![1, 2, 3]);
-        let encoded = envelope.encode();
+        let encoded = envelope.encode().unwrap();
 
         let decoded = decode_checked(&encoded).unwrap();
 

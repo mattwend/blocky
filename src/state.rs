@@ -212,7 +212,10 @@ impl WorldState {
                     .ok_or(StateError::ContractCodeMissing)?;
 
                 let envelope = CallEnvelope::new(method.clone(), args.clone());
-                let input = envelope.encode();
+                let input = envelope
+                    .encode()
+                    .map_err(VmError::AbortedWithMessage)
+                    .map_err(StateError::Vm)?;
                 let mut working_state = self.clone();
                 working_state.transfer(&sender, contract, *deposit)?;
 

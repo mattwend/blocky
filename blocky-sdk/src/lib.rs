@@ -44,9 +44,9 @@ impl CallEnvelope {
     /// Encodes the envelope using Borsh.
     ///
     /// # Returns
-    /// The Borsh-encoded envelope bytes.
-    pub fn encode(&self) -> Vec<u8> {
-        borsh::to_vec(self).expect("call envelope serialization should succeed")
+    /// The Borsh-encoded envelope bytes, or a stringified serialization error.
+    pub fn encode(&self) -> Result<Vec<u8>, String> {
+        borsh::to_vec(self).map_err(|error| error.to_string())
     }
 
     /// Decodes a Borsh-encoded call envelope.
@@ -191,8 +191,13 @@ pub mod storage {
         V: BorshSerialize,
     {
         let key = key.as_ref();
-        let bytes = borsh::to_vec(value)
-            .unwrap_or_else(|_| super::panic_abort("failed to serialize storage value"));
+        let bytes = match borsh::to_vec(value) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                let message = format!("failed to serialize storage value: {error}");
+                super::panic_abort(&message)
+            }
+        };
         unsafe {
             env::storage_write(
                 key.as_ptr(),

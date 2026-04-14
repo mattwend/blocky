@@ -249,7 +249,7 @@ mod tests {
             0,
             address_from_name("contract"),
             "set",
-            CallEnvelope::new("set", vec![1, 2, 3]).encode(),
+            CallEnvelope::new("set", vec![1, 2, 3]).encode().unwrap(),
             0,
         );
 
