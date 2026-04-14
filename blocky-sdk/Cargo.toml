@@ -2,6 +2,12 @@
 name = "blocky-sdk"
 version = "0.1.0"
 edition = "2024"
+description = "Contract-side SDK for Blocky smart contracts"
+readme = "../README.md"
+license = "MIT"
+repository = "https://github.com/mariozechner/blocky"
+keywords = ["blockchain", "wasm", "smart-contracts", "sdk"]
+categories = ["api-bindings", "wasm"]
 
 [lib]
 crate-type = ["rlib", "cdylib"]

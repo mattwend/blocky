@@ -85,7 +85,7 @@ rustup target add wasm32-unknown-unknown
 Run the full test suite:
 
 ```bash
-cargo test
+cargo test --workspace
 ```
 
 Run the demo binary:
