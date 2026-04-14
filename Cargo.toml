@@ -3,7 +3,7 @@ members = [".", "blocky-sdk"]
 
 [package]
 name = "blocky"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 description = "Educational Rust blockchain and Wasm smart-contract playground"
 readme = "README.md"

@@ -1,29 +1,36 @@
 # Blocky
 
-Blocky is a small Rust blockchain project built for learning. It intentionally favors readable code and explicit data flow over production-grade networking, persistence, or consensus complexity. You can use it to explore how transactions become blocks, how a chain is validated, how world state changes over time, and how simple Wasm smart contracts can run inside a deterministic VM.
+Blocky is a compact Rust blockchain runtime for experimentation. It favors readable code and explicit data flow over production-oriented complexity, and follows a lightweight RFC-driven process to evolve architectural decisions over time.
 
-## What is this?
+It explores how to structure a minimal, self-contained execution environment where blockchain state, transaction processing, and smart contract execution remain easy to reason about and evolve. It is intentionally scoped to make system boundaries, execution flow, and state transitions explicit.
 
-At a high level, Blocky combines four teaching pieces in one workspace:
+## Overview
+
+At a high level, Blocky combines four core subsystems:
 
 - a minimal proof-of-work blockchain
 - an in-memory world state for balances, contracts, and storage
 - a Wasm smart-contract runtime with gas metering
 - a terminal REPL for experimenting with the system interactively
 
-The project is meant to be read, run, and modified. If you want a compact codebase that shows how blocks, receipts, contract calls, and host functions fit together, this repo is the intended tour.
+Blocky is designed to be inspected, executed, and extended. If you want a compact codebase where the full execution path—from transaction to state transition—is easy to follow, this repository provides a clear reference.
 
 Example contracts live under [`examples/contracts/`](examples/contracts/) so you can build small Wasm programs and exercise them through the REPL.
 
 ## Status
 
-Blocky currently implements the RFC-001 and RFC-002 learning milestones:
+Blocky is ready for its `v1.0.0` open-source release.
+
+Blocky currently covers the following milestones:
 
 - RFC-001: basic blockchain, proof-of-work mining, validation, demo flow, and REPL
 - RFC-002: world state, payload-based transactions, Wasm contracts, receipts, gas metering, and a small contract SDK
 
+Blocky uses a lightweight RFC process for substantial design changes; see [`docs/rfc-process.md`](docs/rfc-process.md).
+
 Design notes and implementation history live in:
 
+- [`CHANGELOG.md`](CHANGELOG.md)
 - [`docs/rfc-001-initial-design.md`](docs/rfc-001-initial-design.md)
 - [`docs/rfc-002-smart-contracts.md`](docs/rfc-002-smart-contracts.md)
 
@@ -191,7 +198,7 @@ deploy alice /full/path/to/target/wasm32-unknown-unknown/release/counter_contrac
 mine
 ```
 
-The deploy command prints the short derived contract address when the transaction is queued, for example:
+When queued, the deploy command prints the short derived contract address, for example:
 
 ```text
 Deploy queued for 1a2b3c4d from alice.
@@ -217,13 +224,17 @@ log: count = 1
 log: count = 1
 ```
 
-That round-trip demonstrates the full teaching path:
+That round-trip demonstrates the full execution path:
 
 - compile a Rust contract to Wasm
 - deploy it through a blockchain transaction
 - execute it through the VM
 - persist storage in world state
 - inspect behavior through receipts and REPL output
+
+## Release notes
+
+Project release history starts in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Project scope
 
@@ -236,4 +247,4 @@ Blocky is intentionally small. It does **not** currently aim to provide:
 - production consensus or fork choice
 - a production-safe contract ABI standard
 
-That omission is deliberate: the code is optimized for exploration, not deployment.
+Those boundaries are deliberate: the code is optimized for experimentation, inspection, and extension, not production deployment.
