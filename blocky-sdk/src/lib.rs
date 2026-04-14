@@ -1,3 +1,14 @@
+//! Contract-side SDK for blocky's Wasm smart contracts.
+//!
+//! This crate provides structured call input via [`CallEnvelope`], safe wrappers
+//! around runtime host functions such as [`log`], [`balance`], [`deposit`],
+//! [`caller`], and [`transfer`], typed storage helpers in [`storage`], and the
+//! raw imported functions in [`mod@env`] for low-level integrations.
+//!
+//! Most contracts will decode call input with [`call_envelope`] or
+//! [`decode_args`], then interact with storage and the host through the safe
+//! wrappers while compiling to `wasm32-unknown-unknown`.
+
 use borsh::{BorshDeserialize, BorshSerialize};
 use std::{string::String, vec, vec::Vec};
 

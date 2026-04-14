@@ -133,7 +133,7 @@ fn sdk_noop_contract_succeeds() {
 pub extern "C" fn noop() {}
 "#;
 
-    let mut chain = Blockchain::new(1);
+    let mut chain = Blockchain::try_new(1).unwrap();
     let alice = address_from_name("alice");
     chain.credit_balance(alice, 5_000_000);
 
@@ -158,7 +158,7 @@ pub extern "C" fn emit() {
 }
 "#;
 
-    let mut chain = Blockchain::new(1);
+    let mut chain = Blockchain::try_new(1).unwrap();
     let alice = address_from_name("alice");
     chain.credit_balance(alice, 5_000_000);
 
@@ -186,7 +186,7 @@ pub extern "C" fn explode() {
 }
 "#;
 
-    let mut chain = Blockchain::new(1);
+    let mut chain = Blockchain::try_new(1).unwrap();
     let alice = address_from_name("alice");
     chain.credit_balance(alice, 5_000_000);
 
@@ -230,7 +230,7 @@ pub extern "C" fn inspect() {
 }
 "#;
 
-    let mut chain = Blockchain::new(1);
+    let mut chain = Blockchain::try_new(1).unwrap();
     let alice = [43_u8; 32];
     chain.credit_balance(alice, 5_000_000);
 
@@ -273,7 +273,7 @@ pub extern "C" fn clear() {
 }
 "#;
 
-    let mut chain = Blockchain::new(1);
+    let mut chain = Blockchain::try_new(1).unwrap();
     let alice = address_from_name("alice");
     chain.credit_balance(alice, 5_000_000);
 
@@ -321,7 +321,7 @@ pub extern "C" fn payout() {
 }
 "#;
 
-    let mut chain = Blockchain::new(1);
+    let mut chain = Blockchain::try_new(1).unwrap();
     let alice = address_from_name("alice");
     chain.credit_balance(alice, 5_000_000);
 

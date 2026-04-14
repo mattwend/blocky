@@ -45,20 +45,6 @@ pub struct Blockchain {
 }
 
 impl Blockchain {
-    /// Creates a new blockchain, panicking if VM initialization fails.
-    ///
-    /// # Arguments
-    /// - `difficulty`: Proof-of-work difficulty measured in leading zero bits.
-    ///
-    /// # Returns
-    /// A blockchain initialized with a mined genesis block.
-    pub fn new(difficulty: u32) -> Self {
-        match Self::try_new(difficulty) {
-            Ok(blockchain) => blockchain,
-            Err(error) => panic!("failed to initialize blockchain: {error}"),
-        }
-    }
-
     /// Creates a new blockchain with a mined genesis block.
     ///
     /// # Arguments
@@ -243,13 +229,13 @@ mod tests {
 
     #[test]
     fn genesis_block_has_zero_prev_hash() {
-        let chain = Blockchain::new(4);
+        let chain = Blockchain::try_new(4).unwrap();
         assert_eq!(chain.chain[0].prev_hash, [0_u8; 32]);
     }
 
     #[test]
     fn valid_chain_stays_valid() {
-        let mut chain = Blockchain::new(4);
+        let mut chain = Blockchain::try_new(4).unwrap();
         let alice = address_from_name("alice");
         let bob = address_from_name("bob");
         chain.credit_balance(alice, 25);
@@ -265,7 +251,7 @@ mod tests {
 
     #[test]
     fn rejects_transaction_when_balance_is_too_low() {
-        let mut chain = Blockchain::new(4);
+        let mut chain = Blockchain::try_new(4).unwrap();
         let alice = address_from_name("alice");
         let bob = address_from_name("bob");
 
@@ -281,7 +267,7 @@ mod tests {
 
     #[test]
     fn tampering_is_detected() {
-        let mut chain = Blockchain::new(12);
+        let mut chain = Blockchain::try_new(12).unwrap();
         let alice = address_from_name("alice");
         let bob = address_from_name("bob");
         chain.credit_balance(alice, 25);
@@ -301,7 +287,7 @@ mod tests {
 
     #[test]
     fn mine_pending_records_success_receipts() {
-        let mut chain = Blockchain::new(4);
+        let mut chain = Blockchain::try_new(4).unwrap();
         let alice = address_from_name("alice");
         let deploy = Transaction::new_deploy(alice, 0, NOOP_MODULE.to_vec());
         let contract = deploy.derived_contract_address();
@@ -334,7 +320,7 @@ mod tests {
 
     #[test]
     fn mine_pending_records_failure_receipt_for_vm_errors() {
-        let mut chain = Blockchain::new(4);
+        let mut chain = Blockchain::try_new(4).unwrap();
         let alice = address_from_name("alice");
         let deploy = Transaction::new_deploy(alice, 0, EMPTY_MODULE.to_vec());
         let contract = deploy.derived_contract_address();
