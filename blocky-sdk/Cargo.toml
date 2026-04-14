@@ -14,7 +14,7 @@ crate-type = ["rlib", "cdylib"]
 
 [dependencies]
 borsh = { version = "1", features = ["derive"] }
-wee_alloc = "0.4.5"
+talc = { version = "5", features = ["disable-grow-in-place"] }
 
 [dev-dependencies]
 serial_test = "3"

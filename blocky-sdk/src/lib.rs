@@ -12,9 +12,9 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use std::{string::String, vec, vec::Vec};
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_family = "wasm", not(target_feature = "atomics")))]
 #[global_allocator]
-static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
+static ALLOC: talc::wasm::WasmDynamicTalc = talc::wasm::new_wasm_dynamic_allocator();
 
 /// Structured input passed from the host into a contract call.
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
