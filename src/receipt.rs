@@ -36,7 +36,8 @@ impl Receipt {
 }
 
 pub fn transaction_hash(transaction: &Transaction) -> [u8; 32] {
-    let bytes = borsh::to_vec(transaction).unwrap_or_default();
+    let bytes = borsh::to_vec(transaction)
+        .expect("borsh serialization of a fully-owned Transaction should not fail");
     let digest = Sha256::digest(bytes);
     let mut hash = [0_u8; 32];
     hash.copy_from_slice(&digest);
