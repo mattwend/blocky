@@ -13,6 +13,8 @@ At a high level, Blocky combines four teaching pieces in one workspace:
 
 The project is meant to be read, run, and modified. If you want a compact codebase that shows how blocks, receipts, contract calls, and host functions fit together, this repo is the intended tour.
 
+Example contracts live under [`examples/contracts/`](examples/contracts/) so you can build small Wasm programs and exercise them through the REPL.
+
 ## Status
 
 Blocky currently implements the RFC-001 and RFC-002 learning milestones:
@@ -27,9 +29,9 @@ Design notes and implementation history live in:
 
 ## Architecture overview
 
-Workspace members:
+Workspace packages:
 
-- `blocky` — the blockchain, world state, VM, demo binary, and REPL
+- `blocky` — the main package containing the library crate, shared application logic, and executable targets
 - `blocky-sdk` — contract-side helpers for decoding call input, interacting with host functions, and reading/writing typed storage
 
 Runtime flow:
@@ -157,53 +159,15 @@ The `blocky-sdk` crate provides helpers to:
 
 A simple first contract is a counter stored under a fixed key.
 
-### 1. Create a Wasm contract crate
+### 1. Use the included counter example
 
-Create a new crate somewhere outside the workspace, for example `counter-contract/`:
-
-`Cargo.toml`
-
-```toml
-[package]
-name = "counter-contract"
-version = "0.1.0"
-edition = "2024"
-
-[lib]
-crate-type = ["cdylib"]
-
-[profile.release]
-panic = "abort"
-
-[dependencies]
-blocky-sdk = { path = "/path/to/blocky/blocky-sdk" }
-borsh = { version = "1", features = ["derive"] }
-```
-
-`src/lib.rs`
-
-```rust
-use blocky_sdk::{log, storage};
-
-#[unsafe(no_mangle)]
-pub extern "C" fn increment() {
-    let value: u64 = storage::read("count").unwrap_or(0);
-    let next = value + 1;
-    storage::write("count", &next);
-    log(&format!("count = {}", next));
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn get() {
-    let value: u64 = storage::read("count").unwrap_or(0);
-    log(&format!("count = {}", value));
-}
-```
+This repository includes a ready-to-build counter contract at [`examples/contracts/counter/`](examples/contracts/counter/).
 
 ### 2. Build it for Wasm
 
 ```bash
-cargo build --target wasm32-unknown-unknown --release
+cargo build --manifest-path examples/contracts/counter/Cargo.toml \
+  --target wasm32-unknown-unknown --release
 ```
 
 The resulting file will be at:
