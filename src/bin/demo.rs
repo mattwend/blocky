@@ -35,23 +35,25 @@ fn run() -> Result<(), BlockyError> {
     let difficulty = 8;
     let mut blockchain = build_demo_blockchain(difficulty)?;
 
+    let rendered_chain = render_chain(&blockchain)?;
+    let chain_valid = blockchain.is_valid()?;
     info!(
         blocks = blockchain.chain.len(),
+        rendered_chain = %rendered_chain,
+        chain_valid,
         "rendering demo blockchain state"
     );
-    println!("== Blocky Demo ==");
-    print!("{}", render_chain(&blockchain)?);
-    println!("Chain valid: {}", blockchain.is_valid()?);
+    info!("== Blocky Demo ==");
 
     info!("tampering with first mined block to demonstrate validation failure");
-    println!("\nTampering with the first mined block...");
     if let Some(block) = blockchain.chain.get_mut(1)
         && let Some(transaction) = block.transactions.get_mut(0)
         && let Payload::Transfer { amount, .. } = &mut transaction.payload
     {
         *amount += 1;
     }
-    println!("Chain valid after tampering: {}", blockchain.is_valid()?);
+    let chain_valid_after_tampering = blockchain.is_valid()?;
+    info!(chain_valid_after_tampering, "demo state after tampering");
 
     Ok(())
 }
