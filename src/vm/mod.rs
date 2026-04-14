@@ -7,6 +7,7 @@ use wasmtime::{Config, Engine, Linker, Module, Store};
 
 use crate::{Address, Hash};
 
+pub mod gas;
 pub mod host;
 
 pub use host::{ExecutionContext, HostError, VmHostState};
@@ -15,6 +16,12 @@ pub struct VmEngine {
     engine: Engine,
     linker: Linker<VmHostState>,
     module_cache: HashMap<Hash, Arc<Module>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GasReport {
+    pub gas_limit: u64,
+    pub gas_used: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -26,6 +33,7 @@ pub struct CallRequest<'a> {
     pub method: &'a str,
     pub args: &'a [u8],
     pub code: &'a [u8],
+    pub gas_limit: u64,
 }
 
 #[derive(Debug, Error)]
@@ -100,7 +108,7 @@ impl VmEngine {
             )),
         };
         let mut store = Store::new(&self.engine, host_state);
-        store.set_fuel(1_000_000)?;
+        store.set_fuel(request.gas_limit)?;
         let instance = self.linker.instantiate(&mut store, &module)?;
         let function = instance
             .get_func(&mut store, request.method)
@@ -135,7 +143,7 @@ impl VmEngine {
     pub fn execute_call_with_state(
         &mut self,
         request: CallRequest<'_>,
-    ) -> Result<(crate::WorldState, ExecutionContext), VmError> {
+    ) -> Result<(crate::WorldState, ExecutionContext, GasReport), VmError> {
         let module = self.prepare_module(request.code)?;
         let host_state = VmHostState {
             state: request.state,
@@ -147,7 +155,7 @@ impl VmEngine {
             )),
         };
         let mut store = Store::new(&self.engine, host_state);
-        store.set_fuel(1_000_000)?;
+        store.set_fuel(request.gas_limit)?;
         let instance = self.linker.instantiate(&mut store, &module)?;
         let function = instance
             .get_func(&mut store, request.method)
@@ -165,6 +173,7 @@ impl VmEngine {
             });
         }
 
+        let remaining_fuel = store.get_fuel()?;
         let host_state = store.into_data();
         let context = host_state
             .context
@@ -176,7 +185,12 @@ impl VmEngine {
             };
         }
 
-        Ok((host_state.state, context))
+        let gas_report = GasReport {
+            gas_limit: request.gas_limit,
+            gas_used: request.gas_limit.saturating_sub(remaining_fuel),
+        };
+
+        Ok((host_state.state, context, gas_report))
     }
 }
 
@@ -210,7 +224,7 @@ pub fn code_hash(code: &[u8]) -> Hash {
 #[cfg(test)]
 mod tests {
     use super::{CallRequest, VmEngine, code_hash};
-    use crate::transaction::address_from_name;
+    use crate::{transaction::address_from_name, vm::gas::DEFAULT_GAS_LIMIT};
 
     const EMPTY_MODULE: &[u8] = &[0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
     const NOOP_MODULE: &[u8] = &[
@@ -242,7 +256,7 @@ mod tests {
         let caller = address_from_name("alice");
         let contract = address_from_name("contract");
 
-        let (_, context) = vm
+        let (_, context, gas_report) = vm
             .execute_call_with_state(CallRequest {
                 state: crate::WorldState::new(),
                 caller,
@@ -251,6 +265,7 @@ mod tests {
                 method: "noop",
                 args: &[],
                 code: NOOP_MODULE,
+                gas_limit: DEFAULT_GAS_LIMIT,
             })
             .unwrap();
 
@@ -258,5 +273,6 @@ mod tests {
         assert_eq!(context.contract, contract);
         assert!(context.args.is_empty());
         assert!(context.logs.is_empty());
+        assert!(gas_report.gas_used <= gas_report.gas_limit);
     }
 }

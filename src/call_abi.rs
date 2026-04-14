@@ -1,11 +1,6 @@
-use borsh::{BorshDeserialize, BorshSerialize};
-use thiserror::Error;
+pub use blocky_sdk::CallEnvelope;
 
-#[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
-pub struct CallEnvelope {
-    pub method: String,
-    pub args: Vec<u8>,
-}
+use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum CallAbiError {
@@ -15,43 +10,30 @@ pub enum CallAbiError {
     Decode(String),
 }
 
-impl CallEnvelope {
-    pub fn new(method: impl Into<String>, args: Vec<u8>) -> Self {
-        Self {
-            method: method.into(),
-            args,
-        }
+pub fn decode_checked(bytes: &[u8]) -> Result<CallEnvelope, CallAbiError> {
+    if bytes.is_empty() {
+        return Err(CallAbiError::Empty);
     }
 
-    pub fn encode(&self) -> Vec<u8> {
-        borsh::to_vec(self).expect("call envelope serialization should succeed")
-    }
-
-    pub fn decode(bytes: &[u8]) -> Result<Self, CallAbiError> {
-        if bytes.is_empty() {
-            return Err(CallAbiError::Empty);
-        }
-
-        borsh::from_slice(bytes).map_err(|error| CallAbiError::Decode(error.to_string()))
-    }
+    CallEnvelope::decode(bytes).map_err(CallAbiError::Decode)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{CallAbiError, CallEnvelope};
+    use super::{CallAbiError, CallEnvelope, decode_checked};
 
     #[test]
     fn round_trips_borsh_encoded_envelope() {
         let envelope = CallEnvelope::new("set", vec![1, 2, 3]);
         let encoded = envelope.encode();
 
-        let decoded = CallEnvelope::decode(&encoded).unwrap();
+        let decoded = decode_checked(&encoded).unwrap();
 
         assert_eq!(decoded, envelope);
     }
 
     #[test]
     fn rejects_empty_payload() {
-        assert_eq!(CallEnvelope::decode(&[]).unwrap_err(), CallAbiError::Empty);
+        assert_eq!(decode_checked(&[]).unwrap_err(), CallAbiError::Empty);
     }
 }

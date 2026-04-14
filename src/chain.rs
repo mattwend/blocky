@@ -5,7 +5,10 @@ use crate::{
     block::{Block, Hash, hash_meets_difficulty},
     state::StateError,
     transaction::Payload,
-    vm::VmError,
+    vm::{
+        VmError,
+        gas::{BASE_TX_COST, DEFAULT_GAS_LIMIT, deploy_cost},
+    },
 };
 
 #[derive(Debug, Error)]
@@ -79,8 +82,8 @@ impl Blockchain {
 
         let required = match &tx.payload {
             Payload::Transfer { amount, .. } => *amount,
-            Payload::Deploy { .. } => 0,
-            Payload::Call { deposit, .. } => *deposit,
+            Payload::Deploy { code } => deploy_cost(code.len()).saturating_add(BASE_TX_COST),
+            Payload::Call { deposit, .. } => deposit.saturating_add(DEFAULT_GAS_LIMIT),
         };
         let reserved = self
             .pending_transactions
@@ -88,8 +91,8 @@ impl Blockchain {
             .filter(|pending| pending.sender == tx.sender)
             .map(|pending| match &pending.payload {
                 Payload::Transfer { amount, .. } => *amount,
-                Payload::Deploy { .. } => 0,
-                Payload::Call { deposit, .. } => *deposit,
+                Payload::Deploy { code } => deploy_cost(code.len()).saturating_add(BASE_TX_COST),
+                Payload::Call { deposit, .. } => deposit.saturating_add(DEFAULT_GAS_LIMIT),
             })
             .sum::<u64>();
         let available = self.state.get_balance(&tx.sender);
@@ -122,9 +125,20 @@ impl Blockchain {
         let mut receipts = Vec::with_capacity(block.transactions.len());
         for transaction in &block.transactions {
             match working_state.apply_transaction_with_vm(transaction, Some(&mut self.vm)) {
-                Ok(context) => receipts.push(Receipt::success(transaction, context.logs)),
+                Ok((context, gas_report)) => receipts.push(Receipt::success(
+                    transaction,
+                    gas_report.gas_used,
+                    context.logs,
+                )),
                 Err(error) => {
-                    receipts.push(Receipt::failure(transaction, error.to_string()));
+                    let gas_used = match &transaction.payload {
+                        Payload::Deploy { code } => {
+                            BASE_TX_COST.saturating_add(deploy_cost(code.len()))
+                        }
+                        _ => BASE_TX_COST,
+                    };
+                    receipts.push(Receipt::failure(transaction, gas_used, error.to_string()));
+                    self.receipts.push(receipts);
                     self.pending_transactions = transactions;
                     return Err(error.into());
                 }
@@ -170,7 +184,10 @@ impl Blockchain {
 #[cfg(test)]
 mod tests {
     use super::{Blockchain, BlockyError};
-    use crate::transaction::{Payload, Transaction, address_from_name};
+    use crate::{
+        transaction::{Payload, Transaction, address_from_name},
+        vm::gas::BASE_TX_COST,
+    };
 
     const EMPTY_MODULE: &[u8] = &[0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
     const NOOP_MODULE: &[u8] = &[
@@ -244,7 +261,7 @@ mod tests {
         let deploy = Transaction::new_deploy(alice, 0, NOOP_MODULE.to_vec());
         let contract = deploy.derived_contract_address();
 
-        chain.credit_balance(alice, 10);
+        chain.credit_balance(alice, 2_000_000);
         chain.add_transaction(deploy).unwrap();
         chain
             .add_transaction(Transaction::new_call(
@@ -262,6 +279,11 @@ mod tests {
         assert_eq!(chain.receipts.len(), 1);
         assert_eq!(chain.receipts[0].len(), 2);
         assert!(chain.receipts[0].iter().all(|receipt| receipt.success));
+        assert!(
+            chain.receipts[0]
+                .iter()
+                .all(|receipt| receipt.gas_used >= BASE_TX_COST)
+        );
         assert_eq!(chain.state.get_balance(&contract), 3);
     }
 
@@ -272,7 +294,7 @@ mod tests {
         let deploy = Transaction::new_deploy(alice, 0, EMPTY_MODULE.to_vec());
         let contract = deploy.derived_contract_address();
 
-        chain.credit_balance(alice, 10);
+        chain.credit_balance(alice, 2_000_000);
         chain.add_transaction(deploy.clone()).unwrap();
         let failing_call = Transaction {
             sender: alice,
@@ -293,7 +315,10 @@ mod tests {
             error,
             BlockyError::State(crate::StateError::Vm(_))
         ));
-        assert!(chain.receipts.is_empty());
+        assert_eq!(chain.receipts.len(), 1);
+        assert_eq!(chain.receipts[0].len(), 2);
+        assert!(chain.receipts[0][0].success);
+        assert!(!chain.receipts[0][1].success);
         assert_eq!(chain.chain.len(), 1);
         assert!(chain.state.get_account(&contract).is_none());
         assert_eq!(chain.pending_transactions, vec![deploy, failing_call]);

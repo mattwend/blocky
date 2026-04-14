@@ -5,7 +5,10 @@ use thiserror::Error;
 use crate::{
     Address, Block, CallEnvelope, ExecutionContext,
     transaction::{Payload, Transaction},
-    vm::{CallRequest, VmError},
+    vm::{
+        CallRequest, GasReport, VmError,
+        gas::{BASE_TX_COST, DEFAULT_GAS_LIMIT, deploy_cost},
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -97,7 +100,7 @@ impl WorldState {
         &mut self,
         transaction: &Transaction,
         vm: Option<&mut crate::VmEngine>,
-    ) -> Result<ExecutionContext, StateError> {
+    ) -> Result<(ExecutionContext, GasReport), StateError> {
         let sender = transaction.sender;
         let expected_nonce = self
             .get_account(&sender)
@@ -111,6 +114,10 @@ impl WorldState {
         }
 
         let mut context = ExecutionContext::new(sender, sender, 0, Vec::new());
+        let mut gas_report = GasReport {
+            gas_limit: DEFAULT_GAS_LIMIT,
+            gas_used: BASE_TX_COST,
+        };
 
         match &transaction.payload {
             Payload::Transfer { receiver, amount } => {
@@ -122,6 +129,7 @@ impl WorldState {
                     return Err(StateError::ContractAlreadyExists);
                 }
                 self.get_or_create(&contract).code = Some(code.clone());
+                gas_report.gas_used = gas_report.gas_used.saturating_add(deploy_cost(code.len()));
             }
             Payload::Call {
                 contract,
@@ -141,17 +149,21 @@ impl WorldState {
                 working_state.transfer(&sender, contract, *deposit)?;
 
                 if let Some(vm) = vm {
-                    let (next_state, vm_context) = vm.execute_call_with_state(CallRequest {
-                        state: working_state,
-                        caller: sender,
-                        contract: *contract,
-                        deposit: *deposit,
-                        method,
-                        args: &input,
-                        code: &code,
-                    })?;
+                    let (next_state, vm_context, vm_gas_report) =
+                        vm.execute_call_with_state(CallRequest {
+                            state: working_state,
+                            caller: sender,
+                            contract: *contract,
+                            deposit: *deposit,
+                            method,
+                            args: &input,
+                            code: &code,
+                            gas_limit: DEFAULT_GAS_LIMIT.saturating_sub(BASE_TX_COST),
+                        })?;
                     *self = next_state;
                     context = vm_context;
+                    gas_report.gas_used =
+                        gas_report.gas_used.saturating_add(vm_gas_report.gas_used);
                 } else {
                     *self = working_state;
                     context = ExecutionContext::new(sender, *contract, *deposit, input);
@@ -160,7 +172,7 @@ impl WorldState {
         }
 
         self.get_or_create(&sender).nonce += 1;
-        Ok(context)
+        Ok((context, gas_report))
     }
 }
 

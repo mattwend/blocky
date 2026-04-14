@@ -1,4 +1,4 @@
-use std::io;
+use std::{fs, io};
 
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
@@ -31,10 +31,18 @@ pub enum ReplError {
     UnknownCommand(String),
     #[error("usage: add <sender> <receiver> <amount>")]
     InvalidAddUsage,
+    #[error("usage: deploy <sender> <path>")]
+    InvalidDeployUsage,
+    #[error("usage: call <sender> <addr> <method> [args]")]
+    InvalidCallUsage,
+    #[error("usage: balance <addr>")]
+    InvalidBalanceUsage,
     #[error("invalid amount: {0}")]
     InvalidAmount(String),
     #[error("unterminated quoted string")]
     UnterminatedQuote,
+    #[error("invalid address hex: {0}")]
+    InvalidAddress(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,6 +51,19 @@ pub enum ReplCommand {
         sender: String,
         receiver: String,
         amount: u64,
+    },
+    Deploy {
+        sender: String,
+        path: String,
+    },
+    Call {
+        sender: String,
+        contract: crate::Address,
+        method: String,
+        args: Vec<u8>,
+    },
+    Balance {
+        address: crate::Address,
     },
     Mine,
     Print,
@@ -106,18 +127,7 @@ impl Repl {
             } => {
                 let sender_address = address_from_name(&sender);
                 let receiver_address = address_from_name(&receiver);
-                let nonce = self
-                    .blockchain
-                    .state
-                    .get_account(&sender_address)
-                    .map(|account| account.nonce)
-                    .unwrap_or(0)
-                    + self
-                        .blockchain
-                        .pending_transactions
-                        .iter()
-                        .filter(|pending| pending.sender == sender_address)
-                        .count() as u64;
+                let nonce = self.next_nonce(&sender_address);
                 self.blockchain.add_transaction(Transaction::new_transfer(
                     sender_address,
                     nonce,
@@ -126,6 +136,49 @@ impl Repl {
                 ))?;
                 info!(sender = %sender, receiver = %receiver, amount, "queued transaction");
                 self.push_output("Transaction queued.".to_string());
+                Ok(false)
+            }
+            ReplCommand::Deploy { sender, path } => {
+                let sender_address = address_from_name(&sender);
+                let nonce = self.next_nonce(&sender_address);
+                let code = fs::read(&path)?;
+                let tx = Transaction::new_deploy(sender_address, nonce, code);
+                let contract = tx.derived_contract_address();
+                self.blockchain.add_transaction(tx)?;
+                self.push_output(format!(
+                    "Deploy queued for {} from {}.",
+                    short_address(&contract),
+                    sender
+                ));
+                Ok(false)
+            }
+            ReplCommand::Call {
+                sender,
+                contract,
+                method,
+                args,
+            } => {
+                let sender_address = address_from_name(&sender);
+                let nonce = self.next_nonce(&sender_address);
+                self.blockchain.add_transaction(Transaction::new_call(
+                    sender_address,
+                    nonce,
+                    contract,
+                    method.clone(),
+                    args,
+                    0,
+                ))?;
+                self.push_output(format!(
+                    "Call queued: {} -> {}.{}",
+                    sender,
+                    short_address(&contract),
+                    method
+                ));
+                Ok(false)
+            }
+            ReplCommand::Balance { address } => {
+                let balance = self.blockchain.state.get_balance(&address);
+                self.push_output(format!("Balance {} = {}", short_address(&address), balance));
                 Ok(false)
             }
             ReplCommand::Mine => {
@@ -172,6 +225,20 @@ impl Repl {
             }
             ReplCommand::Quit => Ok(true),
         }
+    }
+
+    fn next_nonce(&self, sender: &crate::Address) -> u64 {
+        self.blockchain
+            .state
+            .get_account(sender)
+            .map(|account| account.nonce)
+            .unwrap_or(0)
+            + self
+                .blockchain
+                .pending_transactions
+                .iter()
+                .filter(|pending| pending.sender == *sender)
+                .count() as u64
     }
 
     fn run_loop(
@@ -444,7 +511,7 @@ impl Repl {
     }
 
     fn help_text() -> &'static str {
-        "Commands: add <sender> <receiver> <amount> | mine | print | validate | help | quit"
+        "Commands: add <sender> <receiver> <amount> | deploy <sender> <path> | call <sender> <addr> <method> [args] | balance <addr> | mine | print | validate | help | quit"
     }
 }
 
@@ -470,6 +537,37 @@ pub fn parse_command(line: &str) -> Result<ReplCommand, ReplError> {
                 amount,
             })
         }
+        "deploy" => {
+            if parts.len() != 3 {
+                return Err(ReplError::InvalidDeployUsage);
+            }
+            Ok(ReplCommand::Deploy {
+                sender: parts[1].clone(),
+                path: parts[2].clone(),
+            })
+        }
+        "call" => {
+            if parts.len() < 4 {
+                return Err(ReplError::InvalidCallUsage);
+            }
+            Ok(ReplCommand::Call {
+                sender: parts[1].clone(),
+                contract: parse_address_hex(&parts[2])?,
+                method: parts[3].clone(),
+                args: parts
+                    .get(4)
+                    .map(|s| s.as_bytes().to_vec())
+                    .unwrap_or_default(),
+            })
+        }
+        "balance" => {
+            if parts.len() != 2 {
+                return Err(ReplError::InvalidBalanceUsage);
+            }
+            Ok(ReplCommand::Balance {
+                address: parse_address_hex(&parts[1])?,
+            })
+        }
         "mine" => Ok(ReplCommand::Mine),
         "print" => Ok(ReplCommand::Print),
         "validate" => Ok(ReplCommand::Validate),
@@ -477,6 +575,16 @@ pub fn parse_command(line: &str) -> Result<ReplCommand, ReplError> {
         "quit" | "exit" => Ok(ReplCommand::Quit),
         other => Err(ReplError::UnknownCommand(other.to_string())),
     }
+}
+
+fn parse_address_hex(input: &str) -> Result<crate::Address, ReplError> {
+    let bytes = hex::decode(input).map_err(|_| ReplError::InvalidAddress(input.to_string()))?;
+    if bytes.len() != 32 {
+        return Err(ReplError::InvalidAddress(input.to_string()));
+    }
+    let mut address = [0_u8; 32];
+    address.copy_from_slice(&bytes);
+    Ok(address)
 }
 
 fn short_address(address: &crate::Address) -> String {
@@ -562,6 +670,14 @@ mod tests {
     fn tokenizes_quoted_segments() {
         let tokens = tokenize("add \"alice smith\" bob 5").unwrap();
         assert_eq!(tokens, vec!["add", "alice smith", "bob", "5"]);
+    }
+
+    #[test]
+    fn parses_balance_command() {
+        let address = crate::address_from_name("alice");
+        let command =
+            parse_command(&format!("balance {}", crate::address_to_hex(&address))).unwrap();
+        assert_eq!(command, ReplCommand::Balance { address });
     }
 
     #[test]

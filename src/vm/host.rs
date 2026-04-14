@@ -4,6 +4,8 @@ use wasmtime::{Caller, Linker, Memory};
 
 use crate::{Address, WorldState};
 
+use super::gas::{STORAGE_READ_COST, STORAGE_REMOVE_COST, STORAGE_WRITE_COST, TRANSFER_COST};
+
 #[derive(Debug, Clone)]
 pub struct ExecutionContext {
     pub caller: Address,
@@ -47,6 +49,8 @@ pub enum HostError {
     MissingContext,
     #[error("contract attempted to abort")]
     Aborted,
+    #[error("failed to charge gas: {0}")]
+    Gas(String),
 }
 
 pub fn link_host_functions(linker: &mut Linker<VmHostState>) -> Result<(), wasmtime::Error> {
@@ -170,6 +174,7 @@ pub fn storage_read(
     key_len: i32,
     val_ptr: i32,
 ) -> Result<Option<usize>, HostError> {
+    charge_gas(caller, STORAGE_READ_COST)?;
     let key = read_memory(caller, key_ptr, key_len)?;
     let contract = execution_context(caller)?.contract;
     let value: Option<Vec<u8>> = caller
@@ -195,6 +200,7 @@ pub fn storage_write(
     val_ptr: i32,
     val_len: i32,
 ) -> Result<(), HostError> {
+    charge_gas(caller, STORAGE_WRITE_COST)?;
     let key = read_memory(caller, key_ptr, key_len)?;
     let value = read_memory(caller, val_ptr, val_len)?;
     let contract = execution_context(caller)?.contract;
@@ -212,6 +218,7 @@ pub fn storage_remove(
     key_ptr: i32,
     key_len: i32,
 ) -> Result<bool, HostError> {
+    charge_gas(caller, STORAGE_REMOVE_COST)?;
     let key = read_memory(caller, key_ptr, key_len)?;
     let contract = execution_context(caller)?.contract;
     let removed = caller
@@ -243,6 +250,7 @@ pub fn transfer(
     to_ptr: i32,
     amount: u64,
 ) -> Result<(), HostError> {
+    charge_gas(caller, TRANSFER_COST)?;
     let to = read_address(caller, to_ptr)?;
     let from = execution_context(caller)?.contract;
     caller.data_mut().state.transfer(&from, &to, amount)?;
@@ -268,6 +276,18 @@ fn execution_context<'a>(
         .context
         .as_ref()
         .ok_or(HostError::MissingContext)
+}
+
+fn charge_gas(caller: &mut Caller<'_, VmHostState>, amount: u64) -> Result<(), HostError> {
+    caller
+        .set_fuel(
+            caller
+                .get_fuel()
+                .map_err(|error| HostError::Gas(error.to_string()))?
+                .checked_sub(amount)
+                .ok_or_else(|| HostError::Gas("out of fuel".to_string()))?,
+        )
+        .map_err(|error| HostError::Gas(error.to_string()))
 }
 
 fn read_address(caller: &mut Caller<'_, VmHostState>, ptr: i32) -> Result<Address, HostError> {

@@ -1,5 +1,9 @@
 use borsh::{BorshDeserialize, BorshSerialize};
-use std::io;
+use std::{string::String, vec, vec::Vec};
+
+#[cfg(target_arch = "wasm32")]
+#[global_allocator]
+static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct CallEnvelope {
@@ -8,8 +12,19 @@ pub struct CallEnvelope {
 }
 
 impl CallEnvelope {
-    pub fn decode(bytes: &[u8]) -> Result<Self, io::Error> {
-        borsh::from_slice(bytes)
+    pub fn new(method: impl Into<String>, args: Vec<u8>) -> Self {
+        Self {
+            method: method.into(),
+            args,
+        }
+    }
+
+    pub fn encode(&self) -> Vec<u8> {
+        borsh::to_vec(self).expect("call envelope serialization should succeed")
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self, String> {
+        borsh::from_slice(bytes).map_err(|error| error.to_string())
     }
 }
 
@@ -20,7 +35,7 @@ pub fn input() -> Vec<u8> {
     }
 
     let mut bytes = vec![0_u8; len as usize];
-    let written = unsafe { env::read_input(bytes.as_mut_ptr(), len) };
+    let written = unsafe { env::read_input(bytes.as_mut_ptr()) };
     if written <= 0 {
         return Vec::new();
     }
@@ -29,13 +44,13 @@ pub fn input() -> Vec<u8> {
     bytes
 }
 
-pub fn call_envelope() -> Result<CallEnvelope, io::Error> {
+pub fn call_envelope() -> Result<CallEnvelope, String> {
     CallEnvelope::decode(&input())
 }
 
-pub fn decode_args<T: BorshDeserialize>() -> Result<T, io::Error> {
+pub fn decode_args<T: BorshDeserialize>() -> Result<T, String> {
     let envelope = call_envelope()?;
-    borsh::from_slice(&envelope.args)
+    borsh::from_slice(&envelope.args).map_err(|error| error.to_string())
 }
 
 pub fn log(message: &str) {
@@ -63,6 +78,7 @@ pub fn transfer(to: &[u8; 32], amount: u64) -> bool {
 pub mod storage {
     use super::env;
     use borsh::{BorshDeserialize, BorshSerialize};
+    use std::vec;
 
     pub fn read<K, V>(key: K) -> Option<V>
     where
@@ -114,28 +130,6 @@ pub mod storage {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-#[panic_handler]
-fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
-    let mut message = String::from("panic");
-    if let Some(text) = info.payload().downcast_ref::<&str>() {
-        message.push_str(": ");
-        message.push_str(text);
-    } else if let Some(text) = info.payload().downcast_ref::<String>() {
-        message.push_str(": ");
-        message.push_str(text);
-    }
-
-    if let Some(location) = info.location() {
-        message.push_str(" @ ");
-        message.push_str(location.file());
-        message.push(':');
-        message.push_str(&location.line().to_string());
-    }
-
-    panic_abort(&message)
-}
-
 pub(crate) fn panic_abort(message: &str) -> ! {
     unsafe { env::abort(message.as_ptr(), message.len() as i32) }
 }
@@ -143,7 +137,7 @@ pub(crate) fn panic_abort(message: &str) -> ! {
 pub mod env {
     unsafe extern "C" {
         pub fn input_len() -> i32;
-        pub fn read_input(out_ptr: *mut u8, out_len: i32) -> i32;
+        pub fn read_input(out_ptr: *mut u8) -> i32;
         pub fn storage_read(key_ptr: *const u8, key_len: i32, val_ptr: *mut u8) -> i32;
         pub fn storage_write(key_ptr: *const u8, key_len: i32, val_ptr: *const u8, val_len: i32);
         pub fn storage_remove(key_ptr: *const u8, key_len: i32) -> i32;
@@ -156,6 +150,9 @@ pub mod env {
         pub fn abort(msg_ptr: *const u8, msg_len: i32) -> !;
     }
 }
+
+#[cfg(test)]
+extern crate std;
 
 #[cfg(test)]
 mod tests {
@@ -195,9 +192,9 @@ mod tests {
     }
 
     #[unsafe(no_mangle)]
-    extern "C" fn read_input(out_ptr: *mut u8, out_len: i32) -> i32 {
+    extern "C" fn read_input(out_ptr: *mut u8) -> i32 {
         let host = host().lock().unwrap();
-        let len = usize::min(host.input.len(), out_len.max(0) as usize);
+        let len = host.input.len();
         unsafe { std::ptr::copy_nonoverlapping(host.input.as_ptr(), out_ptr, len) };
         len as i32
     }
