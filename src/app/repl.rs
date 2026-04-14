@@ -1,5 +1,7 @@
 use std::{fs, io};
 
+use serde_json::Value;
+
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
@@ -33,8 +35,12 @@ pub enum ReplError {
     InvalidAddUsage,
     #[error("usage: deploy <sender> <path>")]
     InvalidDeployUsage,
-    #[error("usage: call <sender> <addr> <method> [args]")]
+    #[error("usage: call <sender> <addr> <method> [args|--hex <hex>|--json <json>]")]
     InvalidCallUsage,
+    #[error("invalid hex args: {0}")]
+    InvalidHexArgs(String),
+    #[error("invalid json args: {0}")]
+    InvalidJsonArgs(String),
     #[error("usage: balance <addr>")]
     InvalidBalanceUsage,
     #[error("invalid amount: {0}")]
@@ -43,6 +49,13 @@ pub enum ReplError {
     UnterminatedQuote,
     #[error("invalid address hex: {0}")]
     InvalidAddress(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReplArgEncoding {
+    Utf8,
+    Hex,
+    Json,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,6 +74,7 @@ pub enum ReplCommand {
         contract: crate::Address,
         method: String,
         args: Vec<u8>,
+        encoding: ReplArgEncoding,
     },
     Balance {
         address: crate::Address,
@@ -157,6 +171,7 @@ impl Repl {
                 contract,
                 method,
                 args,
+                encoding,
             } => {
                 let sender_address = address_from_name(&sender);
                 let nonce = self.next_nonce(&sender_address);
@@ -169,10 +184,11 @@ impl Repl {
                     0,
                 ))?;
                 self.push_output(format!(
-                    "Call queued: {} -> {}.{}",
+                    "Call queued: {} -> {}.{} ({})",
                     sender,
                     short_address(&contract),
-                    method
+                    method,
+                    describe_encoding(&encoding)
                 ));
                 Ok(false)
             }
@@ -511,7 +527,7 @@ impl Repl {
     }
 
     fn help_text() -> &'static str {
-        "Commands: add <sender> <receiver> <amount> | deploy <sender> <path> | call <sender> <addr> <method> [args] | balance <addr> | mine | print | validate | help | quit"
+        "Commands: add <sender> <receiver> <amount> | deploy <sender> <path> | call <sender> <addr> <method> [args|--hex <hex>|--json <json>] | balance <addr> | mine | print | validate | help | quit"
     }
 }
 
@@ -550,14 +566,13 @@ pub fn parse_command(line: &str) -> Result<ReplCommand, ReplError> {
             if parts.len() < 4 {
                 return Err(ReplError::InvalidCallUsage);
             }
+            let (args, encoding) = parse_call_args(&parts[4..])?;
             Ok(ReplCommand::Call {
                 sender: parts[1].clone(),
                 contract: parse_address_hex(&parts[2])?,
                 method: parts[3].clone(),
-                args: parts
-                    .get(4)
-                    .map(|s| s.as_bytes().to_vec())
-                    .unwrap_or_default(),
+                args,
+                encoding,
             })
         }
         "balance" => {
@@ -594,6 +609,71 @@ fn short_address(address: &crate::Address) -> String {
 
 fn short_hash(hash: &[u8; 32]) -> String {
     hex::encode(hash).chars().take(8).collect()
+}
+
+fn describe_encoding(encoding: &ReplArgEncoding) -> &'static str {
+    match encoding {
+        ReplArgEncoding::Utf8 => "utf8",
+        ReplArgEncoding::Hex => "hex",
+        ReplArgEncoding::Json => "json-borsh",
+    }
+}
+
+fn parse_call_args(parts: &[String]) -> Result<(Vec<u8>, ReplArgEncoding), ReplError> {
+    match parts {
+        [] => Ok((Vec::new(), ReplArgEncoding::Utf8)),
+        [value] => Ok((value.as_bytes().to_vec(), ReplArgEncoding::Utf8)),
+        [flag, value] if flag == "--hex" => hex::decode(value)
+            .map(|bytes| (bytes, ReplArgEncoding::Hex))
+            .map_err(|_| ReplError::InvalidHexArgs(value.clone())),
+        [flag, value] if flag == "--json" => json_to_borsh_bytes(value),
+        _ => Err(ReplError::InvalidCallUsage),
+    }
+}
+
+fn json_to_borsh_bytes(input: &str) -> Result<(Vec<u8>, ReplArgEncoding), ReplError> {
+    let value: Value =
+        serde_json::from_str(input).map_err(|_| ReplError::InvalidJsonArgs(input.to_string()))?;
+    let bytes = encode_json_value(&value)?;
+    Ok((bytes, ReplArgEncoding::Json))
+}
+
+fn encode_json_value(value: &Value) -> Result<Vec<u8>, ReplError> {
+    match value {
+        Value::Null => Ok(Vec::new()),
+        Value::Bool(boolean) => {
+            borsh::to_vec(boolean).map_err(|_| ReplError::InvalidJsonArgs(value.to_string()))
+        }
+        Value::Number(number) => {
+            if let Some(unsigned) = number.as_u64() {
+                return borsh::to_vec(&unsigned)
+                    .map_err(|_| ReplError::InvalidJsonArgs(value.to_string()));
+            }
+            if let Some(signed) = number.as_i64() {
+                return borsh::to_vec(&signed)
+                    .map_err(|_| ReplError::InvalidJsonArgs(value.to_string()));
+            }
+            Err(ReplError::InvalidJsonArgs(value.to_string()))
+        }
+        Value::String(string) => {
+            borsh::to_vec(string).map_err(|_| ReplError::InvalidJsonArgs(value.to_string()))
+        }
+        Value::Array(array) => array
+            .iter()
+            .map(|entry| match entry {
+                Value::Number(number) => number
+                    .as_u64()
+                    .filter(|value| *value <= u8::MAX as u64)
+                    .map(|value| value as u8)
+                    .ok_or_else(|| ReplError::InvalidJsonArgs(value.to_string())),
+                _ => Err(ReplError::InvalidJsonArgs(value.to_string())),
+            })
+            .collect::<Result<Vec<u8>, ReplError>>()
+            .and_then(|bytes| {
+                borsh::to_vec(&bytes).map_err(|_| ReplError::InvalidJsonArgs(value.to_string()))
+            }),
+        Value::Object(_) => Err(ReplError::InvalidJsonArgs(value.to_string())),
+    }
 }
 
 fn tokenize(line: &str) -> Result<Vec<String>, ReplError> {

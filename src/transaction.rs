@@ -1,5 +1,4 @@
 use borsh::{BorshDeserialize, BorshSerialize};
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -32,20 +31,34 @@ pub enum Payload {
 
 impl Transaction {
     pub fn new_transfer(sender: Address, nonce: u64, receiver: Address, amount: u64) -> Self {
+        Self::new_transfer_at(sender, nonce, receiver, amount, 0)
+    }
+
+    pub fn new_transfer_at(
+        sender: Address,
+        nonce: u64,
+        receiver: Address,
+        amount: u64,
+        timestamp: u64,
+    ) -> Self {
         Self {
             sender,
             nonce,
             payload: Payload::Transfer { receiver, amount },
-            timestamp: Utc::now().timestamp() as u64,
+            timestamp,
         }
     }
 
     pub fn new_deploy(sender: Address, nonce: u64, code: Vec<u8>) -> Self {
+        Self::new_deploy_at(sender, nonce, code, 0)
+    }
+
+    pub fn new_deploy_at(sender: Address, nonce: u64, code: Vec<u8>, timestamp: u64) -> Self {
         Self {
             sender,
             nonce,
             payload: Payload::Deploy { code },
-            timestamp: Utc::now().timestamp() as u64,
+            timestamp,
         }
     }
 
@@ -57,6 +70,18 @@ impl Transaction {
         args: Vec<u8>,
         deposit: u64,
     ) -> Self {
+        Self::new_call_at(sender, nonce, contract, method, args, deposit, 0)
+    }
+
+    pub fn new_call_at(
+        sender: Address,
+        nonce: u64,
+        contract: Address,
+        method: impl Into<String>,
+        args: Vec<u8>,
+        deposit: u64,
+        timestamp: u64,
+    ) -> Self {
         Self {
             sender,
             nonce,
@@ -66,7 +91,7 @@ impl Transaction {
                 args,
                 deposit,
             },
-            timestamp: Utc::now().timestamp() as u64,
+            timestamp,
         }
     }
 

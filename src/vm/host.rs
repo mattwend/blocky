@@ -47,8 +47,6 @@ pub enum HostError {
     OutOfBounds,
     #[error("execution context is missing")]
     MissingContext,
-    #[error("contract attempted to abort")]
-    Aborted,
     #[error("failed to charge gas: {0}")]
     Gas(String),
 }
@@ -253,7 +251,11 @@ pub fn transfer(
     charge_gas(caller, TRANSFER_COST)?;
     let to = read_address(caller, to_ptr)?;
     let from = execution_context(caller)?.contract;
-    caller.data_mut().state.transfer(&from, &to, amount)?;
+    caller
+        .data_mut()
+        .state
+        .transfer(&from, &to, amount)
+        .map_err(|error| HostError::Gas(error.to_string()))?;
     Ok(())
 }
 
@@ -340,18 +342,6 @@ fn checked_offset(ptr: i32, len: i32) -> Result<std::ops::Range<usize>, HostErro
     let length = len as usize;
     let end = start.checked_add(length).ok_or(HostError::OutOfBounds)?;
     Ok(start..end)
-}
-
-impl From<crate::StateError> for HostError {
-    fn from(error: crate::StateError) -> Self {
-        match error {
-            crate::StateError::InsufficientBalance { .. } => HostError::Aborted,
-            crate::StateError::InvalidNonce { .. }
-            | crate::StateError::ContractAlreadyExists
-            | crate::StateError::ContractCodeMissing
-            | crate::StateError::Vm(_) => HostError::Aborted,
-        }
-    }
 }
 
 #[cfg(test)]

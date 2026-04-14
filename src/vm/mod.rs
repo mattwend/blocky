@@ -12,6 +12,11 @@ pub mod host;
 
 pub use host::{ExecutionContext, HostError, VmHostState};
 
+struct PreparedCall {
+    store: Store<VmHostState>,
+    method: String,
+}
+
 pub struct VmEngine {
     engine: Engine,
     linker: Linker<VmHostState>,
@@ -96,55 +101,35 @@ impl VmEngine {
             .ok_or_else(|| VmError::EngineConfig(wasmtime::Error::msg("cached module missing")))
     }
 
-    pub fn execute_call(&mut self, request: CallRequest<'_>) -> Result<ExecutionContext, VmError> {
-        let module = self.prepare_module(request.code)?;
-        let host_state = VmHostState {
-            state: request.state,
-            context: Some(ExecutionContext::new(
-                request.caller,
-                request.contract,
-                request.deposit,
-                request.args.to_vec(),
-            )),
-        };
-        let mut store = Store::new(&self.engine, host_state);
-        store.set_fuel(request.gas_limit)?;
-        let instance = self.linker.instantiate(&mut store, &module)?;
-        let function = instance
-            .get_func(&mut store, request.method)
-            .ok_or_else(|| VmError::MissingMethod(request.method.to_string()))?;
-        if let Err(error) = function.call(&mut store, &[], &mut []) {
-            let message = store
-                .data()
-                .context
-                .as_ref()
-                .and_then(|context| context.revert_message.clone())
-                .or_else(|| extract_error_message(&error));
-            return Err(match message {
-                Some(message) => VmError::AbortedWithMessage(message),
-                None => VmError::EngineConfig(error),
-            });
-        }
-
-        let host_state = store.into_data();
-        let context = host_state
-            .context
-            .ok_or(VmError::Host(HostError::MissingContext))?;
-        if context.reverted {
-            return match context.revert_message {
-                Some(message) => Err(VmError::AbortedWithMessage(message)),
-                None => Err(VmError::Aborted),
-            };
-        }
-
-        Ok(context)
-    }
-
     pub fn execute_call_with_state(
         &mut self,
         request: CallRequest<'_>,
     ) -> Result<(crate::WorldState, ExecutionContext, GasReport), VmError> {
-        let module = self.prepare_module(request.code)?;
+        let gas_limit = request.gas_limit;
+        let PreparedCall { mut store, method } = self.prepare_call(request.clone())?;
+        let instance = {
+            let module = self.prepare_module(request.code)?;
+            self.linker.instantiate(&mut store, &module)?
+        };
+        let function = instance
+            .get_func(&mut store, &method)
+            .ok_or_else(|| VmError::MissingMethod(method.clone()))?;
+        if let Err(error) = function.call(&mut store, &[], &mut []) {
+            return Err(execution_error(&store, error));
+        }
+
+        let remaining_fuel = store.get_fuel()?;
+        let host_state = store.into_data();
+        let context = finalize_context(host_state.context)?;
+        let gas_report = GasReport {
+            gas_limit,
+            gas_used: gas_limit.saturating_sub(remaining_fuel),
+        };
+
+        Ok((host_state.state, context, gas_report))
+    }
+
+    fn prepare_call(&mut self, request: CallRequest<'_>) -> Result<PreparedCall, VmError> {
         let host_state = VmHostState {
             state: request.state,
             context: Some(ExecutionContext::new(
@@ -156,41 +141,34 @@ impl VmEngine {
         };
         let mut store = Store::new(&self.engine, host_state);
         store.set_fuel(request.gas_limit)?;
-        let instance = self.linker.instantiate(&mut store, &module)?;
-        let function = instance
-            .get_func(&mut store, request.method)
-            .ok_or_else(|| VmError::MissingMethod(request.method.to_string()))?;
-        if let Err(error) = function.call(&mut store, &[], &mut []) {
-            let message = store
-                .data()
-                .context
-                .as_ref()
-                .and_then(|context| context.revert_message.clone())
-                .or_else(|| extract_error_message(&error));
-            return Err(match message {
-                Some(message) => VmError::AbortedWithMessage(message),
-                None => VmError::EngineConfig(error),
-            });
-        }
+        Ok(PreparedCall {
+            store,
+            method: request.method.to_string(),
+        })
+    }
+}
 
-        let remaining_fuel = store.get_fuel()?;
-        let host_state = store.into_data();
-        let context = host_state
-            .context
-            .ok_or(VmError::Host(HostError::MissingContext))?;
-        if context.reverted {
-            return match context.revert_message {
-                Some(message) => Err(VmError::AbortedWithMessage(message)),
-                None => Err(VmError::Aborted),
-            };
-        }
-
-        let gas_report = GasReport {
-            gas_limit: request.gas_limit,
-            gas_used: request.gas_limit.saturating_sub(remaining_fuel),
+fn finalize_context(context: Option<ExecutionContext>) -> Result<ExecutionContext, VmError> {
+    let context = context.ok_or(VmError::Host(HostError::MissingContext))?;
+    if context.reverted {
+        return match context.revert_message {
+            Some(message) => Err(VmError::AbortedWithMessage(message)),
+            None => Err(VmError::Aborted),
         };
+    }
+    Ok(context)
+}
 
-        Ok((host_state.state, context, gas_report))
+fn execution_error(store: &Store<VmHostState>, error: wasmtime::Error) -> VmError {
+    let message = store
+        .data()
+        .context
+        .as_ref()
+        .and_then(|context| context.revert_message.clone())
+        .or_else(|| extract_error_message(&error));
+    match message {
+        Some(message) => VmError::AbortedWithMessage(message),
+        None => VmError::EngineConfig(error),
     }
 }
 
