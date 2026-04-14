@@ -35,7 +35,7 @@ pub fn build_demo_blockchain(difficulty: u32) -> Result<Blockchain, BlockyError>
     Ok(blockchain)
 }
 
-pub fn render_chain(blockchain: &Blockchain) -> String {
+pub fn render_chain(blockchain: &Blockchain) -> Result<String, BlockyError> {
     let mut output = String::new();
 
     for (index, block) in blockchain.chain.iter().enumerate() {
@@ -44,7 +44,7 @@ pub fn render_chain(blockchain: &Blockchain) -> String {
         output.push_str(&format!("  Prev hash: {}\n", hash_to_hex(&block.prev_hash)));
         output.push_str(&format!(
             "  Hash:      {}\n",
-            hash_to_hex(&block.compute_hash())
+            hash_to_hex(&block.compute_hash()?)
         ));
         output.push_str(&format!("  Nonce:     {}\n", block.nonce));
         output.push_str("  Transactions:\n");
@@ -99,7 +99,7 @@ pub fn render_chain(blockchain: &Blockchain) -> String {
         }
     }
 
-    output
+    Ok(output)
 }
 
 fn short_hash(hash: &[u8; 32]) -> String {

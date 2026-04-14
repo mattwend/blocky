@@ -25,8 +25,8 @@ fn run() -> Result<(), BlockyError> {
         "rendering demo blockchain state"
     );
     println!("== Blocky Demo ==");
-    print!("{}", render_chain(&blockchain));
-    println!("Chain valid: {}", blockchain.is_valid());
+    print!("{}", render_chain(&blockchain)?);
+    println!("Chain valid: {}", blockchain.is_valid()?);
 
     info!("tampering with first mined block to demonstrate validation failure");
     println!("\nTampering with the first mined block...");
@@ -36,7 +36,7 @@ fn run() -> Result<(), BlockyError> {
     {
         *amount += 1;
     }
-    println!("Chain valid after tampering: {}", blockchain.is_valid());
+    println!("Chain valid after tampering: {}", blockchain.is_valid()?);
 
     Ok(())
 }

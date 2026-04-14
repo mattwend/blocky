@@ -15,6 +15,8 @@ use crate::{
 pub enum BlockyError {
     #[error("cannot mine a block without pending transactions")]
     NoPendingTransactions,
+    #[error("failed to serialize block transactions while hashing: {0}")]
+    BlockHashSerialization(#[source] serde_json::Error),
     #[error("sender has insufficient balance: available {available}, required {required}")]
     InsufficientBalance { available: u64, required: u64 },
     #[error("sender nonce mismatch: expected {expected}, got {got}")]
@@ -44,7 +46,7 @@ impl Blockchain {
 
     pub fn try_new(difficulty: u32) -> Result<Self, BlockyError> {
         let mut genesis = Block::new(Vec::new(), [0_u8; 32]);
-        genesis.mine(difficulty);
+        genesis.mine(difficulty)?;
 
         Ok(Self {
             chain: vec![genesis],
@@ -112,14 +114,13 @@ impl Blockchain {
             return Err(BlockyError::NoPendingTransactions);
         }
 
-        let prev_hash: Hash = self
-            .chain
-            .last()
-            .map(Block::compute_hash)
-            .unwrap_or([0_u8; 32]);
+        let prev_hash: Hash = match self.chain.last() {
+            Some(block) => block.compute_hash()?,
+            None => [0_u8; 32],
+        };
         let transactions = std::mem::take(&mut self.pending_transactions);
         let mut block = Block::new(transactions.clone(), prev_hash);
-        block.mine(self.difficulty);
+        block.mine(self.difficulty)?;
 
         let mut working_state = self.state.clone();
         let mut receipts = Vec::with_capacity(block.transactions.len());
@@ -151,33 +152,33 @@ impl Blockchain {
         Ok(block)
     }
 
-    pub fn is_valid(&self) -> bool {
+    pub fn is_valid(&self) -> Result<bool, BlockyError> {
         let Some(genesis) = self.chain.first() else {
-            return false;
+            return Ok(false);
         };
 
         if genesis.prev_hash != [0_u8; 32] {
-            return false;
+            return Ok(false);
         }
 
-        if !hash_meets_difficulty(&genesis.compute_hash(), self.difficulty) {
-            return false;
+        if !hash_meets_difficulty(&genesis.compute_hash()?, self.difficulty) {
+            return Ok(false);
         }
 
         for (index, block) in self.chain.iter().enumerate() {
-            if !hash_meets_difficulty(&block.compute_hash(), self.difficulty) {
-                return false;
+            if !hash_meets_difficulty(&block.compute_hash()?, self.difficulty) {
+                return Ok(false);
             }
 
             if index > 0 {
                 let prev = &self.chain[index - 1];
-                if block.prev_hash != prev.compute_hash() {
-                    return false;
+                if block.prev_hash != prev.compute_hash()? {
+                    return Ok(false);
                 }
             }
         }
 
-        true
+        Ok(true)
     }
 }
 
@@ -213,7 +214,7 @@ mod tests {
             .unwrap();
         chain.mine_pending().unwrap();
 
-        assert!(chain.is_valid());
+        assert!(chain.is_valid().unwrap());
         assert_eq!(chain.state.get_balance(&alice), 0);
         assert_eq!(chain.state.get_balance(&bob), 25);
     }
@@ -251,7 +252,7 @@ mod tests {
             *amount = 999;
         }
 
-        assert!(!chain.is_valid());
+        assert!(!chain.is_valid().unwrap());
     }
 
     #[test]

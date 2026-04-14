@@ -2,7 +2,7 @@ use chrono::Utc;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::transaction::Transaction;
+use crate::{BlockyError, transaction::Transaction};
 
 pub type Hash = [u8; 32];
 
@@ -24,9 +24,9 @@ impl Block {
         }
     }
 
-    pub fn compute_hash(&self) -> Hash {
-        let serialized_transactions =
-            serde_json::to_string(&self.transactions).unwrap_or_else(|_| "[]".to_string());
+    pub fn compute_hash(&self) -> Result<Hash, BlockyError> {
+        let serialized_transactions = serde_json::to_string(&self.transactions)
+            .map_err(BlockyError::BlockHashSerialization)?;
         let input = format!(
             "{}{}{}{}",
             self.timestamp,
@@ -38,13 +38,14 @@ impl Block {
         let digest = Sha256::digest(input.as_bytes());
         let mut hash = [0_u8; 32];
         hash.copy_from_slice(&digest);
-        hash
+        Ok(hash)
     }
 
-    pub fn mine(&mut self, difficulty: u32) {
-        while !hash_meets_difficulty(&self.compute_hash(), difficulty) {
+    pub fn mine(&mut self, difficulty: u32) -> Result<(), BlockyError> {
+        while !hash_meets_difficulty(&self.compute_hash()?, difficulty) {
             self.nonce = self.nonce.saturating_add(1);
         }
+        Ok(())
     }
 }
 
@@ -86,7 +87,7 @@ mod tests {
             transactions: vec![tx],
         };
 
-        assert_eq!(block.compute_hash(), block.compute_hash());
+        assert_eq!(block.compute_hash().unwrap(), block.compute_hash().unwrap());
     }
 
     #[test]
@@ -103,8 +104,8 @@ mod tests {
             )],
         };
 
-        block.mine(8);
+        block.mine(8).unwrap();
 
-        assert!(hash_meets_difficulty(&block.compute_hash(), 8));
+        assert!(hash_meets_difficulty(&block.compute_hash().unwrap(), 8));
     }
 }

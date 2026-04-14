@@ -224,13 +224,13 @@ impl Repl {
                     blocks = self.blockchain.chain.len(),
                     "rendering blockchain state in repl"
                 );
-                for line in render_chain(&self.blockchain).lines() {
+                for line in render_chain(&self.blockchain)?.lines() {
                     self.push_output(line.to_string());
                 }
                 Ok(false)
             }
             ReplCommand::Validate => {
-                let is_valid = self.blockchain.is_valid();
+                let is_valid = self.blockchain.is_valid()?;
                 info!(is_valid, "validated blockchain state");
                 self.push_output(format!("Chain valid: {is_valid}"));
                 Ok(false)
@@ -461,7 +461,10 @@ impl Repl {
                 self.blockchain.pending_transactions.len()
             )),
             Line::from(format!("Difficulty: {}", self.blockchain.difficulty)),
-            Line::from(format!("Valid: {}", self.blockchain.is_valid())),
+            Line::from(match self.blockchain.is_valid() {
+                Ok(is_valid) => format!("Valid: {is_valid}"),
+                Err(error) => format!("Valid: error ({error})"),
+            }),
             Line::from(format!("History: {}", self.history.len())),
             Line::from(format!(
                 "Alice: {}",
