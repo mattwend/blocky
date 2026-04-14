@@ -176,13 +176,13 @@ fn deterministic_config() -> Result<Config, wasmtime::Error> {
     let mut config = Config::new();
     config.wasm_multi_memory(false);
     config.wasm_multi_value(true);
-    config.wasm_reference_types(false);
+    config.wasm_reference_types(true);
     config.wasm_simd(false);
     config.wasm_tail_call(false);
     config.wasm_threads(false);
     config.wasm_relaxed_simd(false);
     config.wasm_bulk_memory(true);
-    config.wasm_function_references(false);
+    config.wasm_function_references(true);
     config.consume_fuel(true);
     config.cranelift_nan_canonicalization(true);
     Ok(config)
