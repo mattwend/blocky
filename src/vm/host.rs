@@ -134,7 +134,10 @@ pub fn link_host_functions(linker: &mut Linker<VmHostState>) -> Result<(), wasmt
     linker.func_wrap(
         "env",
         "log",
-        |mut caller: Caller<'_, VmHostState>, msg_ptr: i32, msg_len: i32| {
+        |mut caller: Caller<'_, VmHostState>, msg_ptr: i32, msg_len: i64| {
+            let Ok(msg_len) = i32::try_from(msg_len) else {
+                return;
+            };
             if let Ok(message_bytes) = read_memory(&mut caller, msg_ptr, msg_len) {
                 let message = String::from_utf8_lossy(&message_bytes).into_owned();
                 if let Some(context) = caller.data_mut().context.as_mut() {
