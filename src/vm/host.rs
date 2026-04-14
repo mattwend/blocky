@@ -497,24 +497,29 @@ mod tests {
     }
 
     #[test]
-    fn execution_context_initializes_cleanly() {
+    fn execution_context_starts_non_reverted_with_no_logs() {
         let caller = address_from_name("alice");
         let contract = address_from_name("contract");
         let context = ExecutionContext::new(caller, contract, 7, vec![1, 2, 3]);
 
-        assert_eq!(context.caller, caller);
-        assert_eq!(context.contract, contract);
-        assert_eq!(context.deposit, 7);
-        assert_eq!(context.args, vec![1, 2, 3]);
         assert!(!context.reverted);
         assert!(context.revert_message.is_none());
         assert!(context.logs.is_empty());
     }
 
     #[test]
-    fn host_state_defaults_to_empty_world_state() {
-        let state = VmHostState::default();
-        assert_eq!(state.state.get_balance(&address_from_name("nobody")), 0);
-        assert!(state.context.is_none());
+    fn host_state_can_store_context() {
+        let caller = address_from_name("alice");
+        let contract = address_from_name("contract");
+        let state = VmHostState {
+            context: Some(ExecutionContext::new(caller, contract, 7, vec![1, 2, 3])),
+            ..VmHostState::default()
+        };
+
+        let context = state.context.as_ref().unwrap();
+        assert_eq!(context.caller, caller);
+        assert_eq!(context.contract, contract);
+        assert_eq!(context.deposit, 7);
+        assert_eq!(context.args, vec![1, 2, 3]);
     }
 }

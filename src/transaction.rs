@@ -223,9 +223,9 @@ mod tests {
     use crate::CallEnvelope;
 
     #[test]
-    fn derived_contract_address_is_deterministic() {
+    fn derived_contract_address_matches_equal_transactions() {
         let sender = address_from_name("alice");
-        let tx = Transaction {
+        let tx_a = Transaction {
             sender,
             nonce: 3,
             payload: Payload::Deploy {
@@ -233,8 +233,19 @@ mod tests {
             },
             timestamp: 1,
         };
+        let tx_b = Transaction {
+            sender,
+            nonce: 3,
+            payload: Payload::Deploy {
+                code: vec![9, 9, 9],
+            },
+            timestamp: 99,
+        };
 
-        assert_eq!(tx.derived_contract_address(), tx.derived_contract_address());
+        assert_eq!(
+            tx_a.derived_contract_address(),
+            tx_b.derived_contract_address()
+        );
     }
 
     #[test]

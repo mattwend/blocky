@@ -279,8 +279,11 @@ mod tests {
     ];
 
     #[test]
-    fn code_hash_is_deterministic() {
-        assert_eq!(code_hash(EMPTY_MODULE), code_hash(EMPTY_MODULE));
+    fn equal_code_bytes_hash_to_same_value() {
+        let bytes_a = EMPTY_MODULE.to_vec();
+        let bytes_b = EMPTY_MODULE.to_vec();
+
+        assert_eq!(code_hash(&bytes_a), code_hash(&bytes_b));
     }
 
     #[test]

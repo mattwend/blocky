@@ -82,12 +82,15 @@ mod tests {
     use crate::transaction::{Transaction, address_from_name};
 
     #[test]
-    fn transaction_hash_is_deterministic() {
-        let tx =
+    fn transaction_hash_matches_equal_transactions() {
+        let tx_a =
             Transaction::new_transfer(address_from_name("alice"), 0, address_from_name("bob"), 5);
+        let tx_b =
+            Transaction::new_transfer(address_from_name("alice"), 0, address_from_name("bob"), 5);
+
         assert_eq!(
-            transaction_hash(&tx).unwrap(),
-            transaction_hash(&tx).unwrap()
+            transaction_hash(&tx_a).unwrap(),
+            transaction_hash(&tx_b).unwrap()
         );
     }
 

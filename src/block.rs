@@ -118,17 +118,28 @@ mod tests {
     use crate::transaction::{Transaction, address_from_name};
 
     #[test]
-    fn hash_is_deterministic() {
-        let tx =
+    fn equal_blocks_hash_to_same_value() {
+        let tx_a =
             Transaction::new_transfer(address_from_name("alice"), 0, address_from_name("bob"), 10);
-        let block = Block {
+        let tx_b =
+            Transaction::new_transfer(address_from_name("alice"), 0, address_from_name("bob"), 10);
+        let block_a = Block {
             timestamp: 2,
             prev_hash: [7; 32],
             nonce: 3,
-            transactions: vec![tx],
+            transactions: vec![tx_a],
+        };
+        let block_b = Block {
+            timestamp: 2,
+            prev_hash: [7; 32],
+            nonce: 3,
+            transactions: vec![tx_b],
         };
 
-        assert_eq!(block.compute_hash().unwrap(), block.compute_hash().unwrap());
+        assert_eq!(
+            block_a.compute_hash().unwrap(),
+            block_b.compute_hash().unwrap()
+        );
     }
 
     #[test]

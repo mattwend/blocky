@@ -254,7 +254,7 @@ extern crate std;
 
 #[cfg(test)]
 mod tests {
-    use super::{CallEnvelope, balance, caller, decode_args, deposit, storage};
+    use super::{CallEnvelope, balance, call_envelope, caller, decode_args, deposit, storage};
     use borsh::{BorshDeserialize, BorshSerialize};
     use std::collections::BTreeMap;
     use std::sync::{Mutex, OnceLock};
@@ -382,16 +382,18 @@ mod tests {
 
     #[test]
     fn decodes_typed_args_from_envelope_payload() {
+        reset_host();
         let envelope = CallEnvelope {
             method: "set".to_string(),
             args: borsh::to_vec(&SetArgs { value: 11 }).unwrap(),
         };
-        let encoded = borsh::to_vec(&envelope).unwrap();
-        let decoded = CallEnvelope::decode(&encoded).unwrap();
-        let args: SetArgs = borsh::from_slice(&decoded.args).unwrap();
+        host().lock().unwrap().input = envelope.encode().unwrap();
 
+        let decoded_envelope = call_envelope().unwrap();
+        let args: SetArgs = decode_args().unwrap();
+
+        assert_eq!(decoded_envelope.method, "set");
         assert_eq!(args, SetArgs { value: 11 });
-        let _ = decode_args::<SetArgs>;
     }
 
     #[test]
