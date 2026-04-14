@@ -1,4 +1,3 @@
-use anyhow::anyhow;
 use thiserror::Error;
 use tracing::warn;
 use wasmtime::{Caller, Linker, Memory};
@@ -214,7 +213,7 @@ pub fn link_host_functions(linker: &mut Linker<VmHostState>) -> Result<(), wasmt
                 context.revert_message = Some(message.clone());
             }
 
-            Err(anyhow!(message))
+            Err(wasmtime::Error::msg(message))
         },
     )?;
     Ok(())

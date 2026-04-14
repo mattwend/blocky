@@ -5,6 +5,14 @@ use crate::{
     transaction_hash,
 };
 
+/// Builds the demo blockchain used by the printable walkthrough.
+///
+/// # Arguments
+/// - `difficulty`: Proof-of-work difficulty used for the demo chain.
+///
+/// # Returns
+/// A blockchain preloaded with sample balances and a mined block, or an error
+/// if setup or mining fails.
 pub fn build_demo_blockchain(difficulty: u32) -> Result<Blockchain, BlockyError> {
     let mut blockchain = Blockchain::try_new(difficulty)?;
     info!(difficulty, "initialized demo blockchain");
@@ -35,6 +43,14 @@ pub fn build_demo_blockchain(difficulty: u32) -> Result<Blockchain, BlockyError>
     Ok(blockchain)
 }
 
+/// Renders the blockchain and receipts into a human-readable text view.
+///
+/// # Arguments
+/// - `blockchain`: Blockchain instance to render.
+///
+/// # Returns
+/// A formatted string containing blocks, transactions, and receipts, or an
+/// error if block or transaction hashing fails.
 pub fn render_chain(blockchain: &Blockchain) -> Result<String, BlockyError> {
     let mut output = String::new();
 

@@ -5,7 +5,7 @@ edition = "2024"
 description = "Contract-side SDK for Blocky smart contracts"
 readme = "../README.md"
 license = "MIT"
-repository = "https://github.com/mariozechner/blocky"
+repository = "https://github.com/mattwend/blocky"
 keywords = ["blockchain", "wasm", "smart-contracts", "sdk"]
 categories = ["api-bindings", "wasm"]
 
@@ -15,3 +15,6 @@ crate-type = ["rlib", "cdylib"]
 [dependencies]
 borsh = { version = "1", features = ["derive"] }
 wee_alloc = "0.4.5"
+
+[dev-dependencies]
+serial_test = "3"

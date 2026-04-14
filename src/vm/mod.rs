@@ -1,6 +1,5 @@
 use std::{collections::HashMap, sync::Arc};
 
-use anyhow::Error as AnyhowError;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use wasmtime::{Config, Engine, Linker, Module, Store};
@@ -249,7 +248,7 @@ fn deterministic_config() -> Result<Config, wasmtime::Error> {
 }
 
 fn extract_error_message(error: &wasmtime::Error) -> Option<String> {
-    error.downcast_ref::<AnyhowError>().map(ToString::to_string)
+    Some(error.to_string()).filter(|message| !message.is_empty())
 }
 
 /// Computes the code hash used to cache compiled Wasm modules.

@@ -5,9 +5,14 @@ members = [".", "blocky-sdk"]
 name = "blocky"
 version = "0.1.0"
 edition = "2024"
+description = "Educational Rust blockchain and Wasm smart-contract playground"
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/mattwend/blocky"
+keywords = ["blockchain", "wasm", "smart-contracts", "education"]
+categories = ["cryptography::cryptocurrencies", "wasm"]
 
 [dependencies]
-anyhow = "1"
 blocky-sdk = { path = "blocky-sdk" }
 borsh = { version = "1", features = ["derive"] }
 chrono = { version = "0.4", default-features = true }

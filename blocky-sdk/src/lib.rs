@@ -256,6 +256,7 @@ extern crate std;
 mod tests {
     use super::{CallEnvelope, balance, call_envelope, caller, decode_args, deposit, storage};
     use borsh::{BorshDeserialize, BorshSerialize};
+    use serial_test::serial;
     use std::collections::BTreeMap;
     use std::sync::{Mutex, OnceLock};
 
@@ -369,6 +370,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn decodes_envelope() {
         let envelope = CallEnvelope {
             method: "set".to_string(),
@@ -381,6 +383,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn decodes_typed_args_from_envelope_payload() {
         reset_host();
         let envelope = CallEnvelope {
@@ -397,6 +400,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn host_wrappers_delegate_to_env() {
         reset_host();
         let mut guard = host().lock().unwrap();
@@ -418,6 +422,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn typed_storage_round_trip_and_remove() {
         reset_host();
 
