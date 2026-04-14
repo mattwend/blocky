@@ -1,36 +1,59 @@
 # RFC-002: Smart Contracts via WebAssembly
 
-**Status:** Draft
-**Date:** 2026-04-11
+**Status:** Implemented, with follow-up validation and hardening work still open
+**Created:** 2026-04-11
 **Depends on:** RFC-001
+**Last reviewed:** 2026-04-14
+**Implemented by:** `0123cd3`, `e04d852`, `79a960a`, `70b9f37`, `d780125`, `6bee094`, `a85ba6e`, `d434dfa`, `71b275d`, `b08c89f`, `9a2f01f`, `bf35784`, `55aa4b2`, `3d6388d`, `d1b3e59`
 
 ## Goal
 
-Add smart contract support to Blocky. Contracts are written in Rust, compiled to Wasm, and executed in a sandboxed runtime. This RFC also introduces world state (account balances and contract storage) as a prerequisite.
+Add smart contract support to Blocky. Contracts are written in Rust, compiled to Wasm, and executed in a sandboxed runtime. This RFC also introduces world state as a prerequisite.
+
+## Historical role
+
+Repository history shows this RFC was added before the world-state, VM, receipts, SDK, and gas-metering work landed:
+
+- `0123cd3` — `docs(rfc): add smart contract rfc`
+- `e04d852` — `feat(state): add world state and payload-based transactions`
+- `79a960a` — `feat(vm): add host function state scaffolding`
+- `70b9f37` — `feat(vm): wire contract execution into state transitions`
+- `d780125` — `feat(chain): add execution receipts and vm error propagation`
+- `d434dfa` — `feat(vm): add structured call envelope`
+- `71b275d` — `feat(sdk): add call envelope decoding helpers`
+- `b08c89f` — `feat(sdk): add host wrappers and typed storage`
+- `9a2f01f` — `feat(vm): add gas metering and repl contract commands`
+- `bf35784` — `refactor(vm): make transactions deterministic and simplify execution`
+
+This file therefore documents a real architecture phase, not just an aspirational note.
 
 ## Design Principles
 
-1. **Determinism** — All nodes must produce identical results. Wasm is deterministic by default; we ban floats in contracts.
-2. **Sandboxing** — Contracts cannot access the filesystem, network, or system clock. All external interaction goes through host functions.
-3. **Metering** — Every contract call has a fuel (gas) budget. Execution halts if fuel runs out.
-4. **Simplicity** — Minimal viable contract system. No cross-contract calls in v1.
+1. **Determinism** — All nodes must produce identical results. The implementation configures wasmtime for deterministic execution and avoids float-based contract interfaces.
+2. **Sandboxing** — Contracts interact with the outside world only through host functions.
+3. **Metering** — Contract execution is fuel-metered.
+4. **Simplicity** — The initial implementation focuses on a small, single-contract-call execution model.
 
 ## World State
 
-State is the missing layer between transactions and the chain. We introduce it here because contracts need something to read from and write to.
+State is the layer between transactions and the chain. It is required for balances, contract code, and contract storage.
 
 ### Account Model
+
+Implemented shape:
 
 ```rust
 pub struct AccountState {
     pub balance: u64,
-    pub nonce: u64,                        // replay protection
-    pub code: Option<Vec<u8>>,             // wasm bytecode (None for regular accounts)
-    pub storage: BTreeMap<Vec<u8>, Vec<u8>>, // contract key-value store
+    pub nonce: u64,
+    pub code: Option<Vec<u8>>,
+    pub storage: BTreeMap<Vec<u8>, Vec<u8>>,
 }
 ```
 
 ### State Store
+
+Implemented shape:
 
 ```rust
 pub struct WorldState {
@@ -38,25 +61,28 @@ pub struct WorldState {
 }
 
 pub type Address = [u8; 32];
-
-impl WorldState {
-    pub fn get_account(&self, addr: &Address) -> Option<&AccountState>;
-    pub fn get_or_create(&mut self, addr: &Address) -> &mut AccountState;
-    pub fn get_balance(&self, addr: &Address) -> u64;
-    pub fn transfer(&mut self, from: &Address, to: &Address, amount: u64) -> Result<()>;
-    pub fn apply_block(&mut self, block: &Block) -> Result<()>;
-}
 ```
 
-`WorldState` lives on `Blockchain` and is updated when a block is mined. It is the authoritative record of all balances and contract storage.
+Implemented operations include:
+
+- `get_account`
+- `get_or_create`
+- `get_balance`
+- `set_balance`
+- `transfer`
+- `apply_block`
+- `apply_transaction`
+- `apply_transaction_with_vm`
+
+`WorldState` lives on `Blockchain` and is updated during mined block execution.
 
 ### Balance Enforcement
 
-`add_transaction` now validates that the sender has sufficient balance. This fulfills the RFC-001 decision to defer balance tracking to a later RFC.
+`Blockchain::add_transaction` now enforces sender balance constraints, including reserved cost from pending transactions.
 
 ## Transaction Types
 
-The current `Transaction` struct is extended with a payload enum:
+The simple transaction form from RFC-001 was replaced with a payload-based model:
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
@@ -79,219 +105,207 @@ pub enum Payload {
     Call {
         contract: Address,
         method: String,
-        args: Vec<u8>,       // borsh-encoded arguments
-        deposit: u64,        // tokens sent with the call
+        args: Vec<u8>,
+        deposit: u64,
     },
 }
 ```
 
 ### Address Derivation
 
-- **User accounts:** SHA-256 of public key (public-key crypto is out of scope; for now, SHA-256 of the name string).
-- **Contract accounts:** SHA-256 of `(deployer_address, deployer_nonce)` at deploy time. Deterministic and collision-free.
+Implemented behavior:
+
+- **User accounts:** helper support exists for deriving an address as SHA-256 of a name string for local experimentation.
+- **Contract accounts:** derived deterministically from `(sender, nonce)` using SHA-256.
 
 ## Wasm Runtime
 
 ### Engine: wasmtime
 
-[wasmtime](https://crates.io/crates/wasmtime) is the Bytecode Alliance reference Wasm runtime. Chosen for:
-
-- First-class Rust API
-- Cranelift JIT/AOT compilation
-- Built-in fuel metering (`Store::set_fuel`)
-- Production-proven (Fastly, Fermyon, NEAR)
-- Deterministic execution guarantees
+The implementation uses `wasmtime` and configures the engine for deterministic execution with fuel consumption enabled.
 
 ### Execution Flow
 
-```
+Implemented high-level flow:
+
+```text
 Call transaction received
   │
   ▼
-WorldState.get_account(contract) → load wasm bytecode
+Load target contract bytecode from WorldState
   │
   ▼
-wasmtime::Module::new(engine, &bytecode)
+Prepare a Store with host state and fuel budget
   │
   ▼
-Create Store with:
-  - fuel limit (from gas budget)
-  - host state (caller, deposit, contract address)
+Instantiate a cached or newly compiled wasmtime Module
   │
   ▼
-Link host functions into the module
+Resolve the exported method by name
   │
   ▼
-instance.get_func(method)?.call(args)
+Execute the method with host functions linked under env
   │
   ▼
-On success: commit state changes
-On failure/out-of-fuel: revert all changes
+On success: commit resulting state and emit receipt
+On failure or abort: revert changes and emit failure receipt
 ```
 
 ### Module Caching
 
-Compiling Wasm on every call is expensive. We cache compiled `wasmtime::Module` objects keyed by code hash. The cache is invalidated only if the bytecode changes (it won't — deployed code is immutable).
+Implemented.
+
+Compiled `wasmtime::Module` instances are cached by code hash in `VmEngine`.
 
 ## Host Functions
 
-Host functions are the contract's only interface to the outside world. They are linked into the Wasm instance via wasmtime's `Linker`.
+Host functions remain the contract's interface to the runtime. They are linked into the Wasm instance through the `env` import module.
 
-### Namespace: `env`
+The RFC-level interface remains valid in spirit:
 
-| Function | Signature | Description |
-|---|---|---|
-| `storage_read` | `(key_ptr, key_len, val_ptr) -> i32` | Read from contract storage. Returns value length, or -1 if not found. |
-| `storage_write` | `(key_ptr, key_len, val_ptr, val_len)` | Write to contract storage. |
-| `storage_remove` | `(key_ptr, key_len) -> i32` | Delete key. Returns 1 if existed, 0 otherwise. |
-| `get_balance` | `() -> u64` | Balance of the current contract. |
-| `get_caller` | `(out_ptr)` | Write caller's 32-byte address to memory. |
-| `get_deposit` | `() -> u64` | Tokens sent with this call. |
-| `transfer` | `(to_ptr, amount) -> i32` | Transfer from contract balance. Returns 0 on success, 1 on insufficient funds. |
-| `log` | `(msg_ptr, msg_len)` | Emit a log entry (stored in transaction receipt). |
-| `abort` | `(msg_ptr, msg_len)` | Abort execution, revert all state changes. |
+| Function | Purpose |
+|---|---|
+| `storage_read` | Read contract storage |
+| `storage_write` | Write contract storage |
+| `storage_remove` | Delete contract storage |
+| `get_balance` | Read current contract balance |
+| `get_caller` | Read caller address |
+| `get_deposit` | Read attached deposit |
+| `transfer` | Transfer funds from contract balance |
+| `log` | Emit receipt logs |
+| `abort` | Abort execution and revert |
 
-All pointer-based functions operate on the contract's linear memory. The host reads/writes directly via `wasmtime::Memory`.
+The exact host import wiring and ABI details should now be treated as authoritative in the current code and SDK.
 
 ## Serialization: Borsh
 
-[Borsh](https://crates.io/crates/borsh) (Binary Object Representation Serializer for Hashing) is used for all contract-facing serialization:
+Borsh is now central to the contract boundary and several internal value representations.
 
-- **Transaction args** — Borsh-encoded by the caller, Borsh-decoded by the contract.
-- **Contract storage values** — Contracts Borsh-encode before calling `storage_write`.
-- **Return values** — Borsh-encoded in Wasm memory, pointer+length returned to host.
+Implemented usage includes:
 
-Why Borsh over other formats:
+- Borsh serialization for transaction payload types
+- Borsh-encoded `CallEnvelope { method, args }` framing for contract call input
+- Borsh storage helpers in `blocky-sdk`
+- Borsh receipt serialization derives
 
-| Property | Borsh | serde_json | MessagePack |
-|---|---|---|---|
-| Deterministic | Yes | No (key order) | No (map order) |
-| Compact | Yes | No | Yes |
-| Schema-driven | Yes | No | No |
-| Rust-native | Yes | Yes | Yes |
-| Hash-safe | Yes | No | No |
+The original note that internal chain serialization would migrate further over time remains reasonable, but the current codebase already uses Borsh more broadly than this RFC originally described.
 
-Deterministic serialization is critical — the same data must always produce the same bytes, because serialized data feeds into hashes.
+## Call Envelope
 
-**Note:** Internal chain serialization (block hashing, etc.) will migrate from `serde_json` to Borsh in a future RFC. This RFC only uses Borsh at the contract boundary.
+An important implementation detail added during RFC-002 work is the structured call envelope:
+
+```rust
+pub struct CallEnvelope {
+    pub method: String,
+    pub args: Vec<u8>,
+}
+```
+
+Contract call payloads are framed as a Borsh-encoded `CallEnvelope` so guest code can decode structured input from `env::read_input()`.
 
 ## Gas Metering
 
-wasmtime's built-in fuel system maps directly to gas:
+Implemented.
 
-```rust
-store.set_fuel(gas_limit)?;
-// ... execute ...
-let remaining = store.get_fuel()?;
-let gas_used = gas_limit - remaining;
-```
+The VM uses wasmtime fuel metering and reports gas used per transaction. Current gas constants include:
 
-### Gas Costs (v1, subject to tuning)
+- base transaction cost
+- storage read/write/remove cost
+- transfer cost
+- deploy cost per byte
+- default gas limit
 
-| Operation | Cost |
-|---|---|
-| Base transaction | 1,000 |
-| Wasm instruction | 1 (wasmtime default) |
-| `storage_read` | 500 |
-| `storage_write` | 2,000 |
-| `storage_remove` | 500 |
-| `transfer` | 1,000 |
-| Deploy (per byte) | 10 |
-
-Default gas limit per transaction: **1,000,000**.
+The exact values are defined in `src/vm/gas.rs`.
 
 ## Contract SDK
 
-A small Rust crate (`blocky-sdk`) that contract authors depend on. It wraps the raw host function FFI in safe Rust:
+Implemented as the `blocky-sdk` workspace member.
 
-```rust
-// Example contract using the SDK
-use blocky_sdk::{storage, caller, deposit, transfer, log};
+Implemented capabilities include:
 
-#[no_mangle]
-pub fn donate() {
-    let donor = caller();
-    let amount = deposit();
-    let mut total: u64 = storage::read("total").unwrap_or(0);
-    total += amount;
-    storage::write("total", &total);
-    log(&format!("received {} from {:?}", amount, donor));
-}
-
-#[no_mangle]
-pub fn withdraw() {
-    let owner: [u8; 32] = storage::read("owner").unwrap();
-    assert_eq!(caller(), owner, "only owner can withdraw");
-    let balance = blocky_sdk::balance();
-    transfer(&owner, balance);
-}
-```
-
-The SDK compiles to `wasm32-unknown-unknown`. It provides:
-
-- `#[no_mangle] pub fn` — the entry point convention
-- Borsh serde behind safe wrapper functions
-- Memory allocator (`dlmalloc` or `wee_alloc`)
-- Panic handler that calls `env::abort`
+- `CallEnvelope` encode/decode helpers
+- `input()` and `call_envelope()` accessors
+- typed `decode_args<T>()`
+- host wrappers for `log`, `balance`, `deposit`, `caller`, and `transfer`
+- typed Borsh storage helpers
+- Wasm allocator wiring
+- panic-to-abort behavior for Wasm usage
 
 ## Execution Receipts
 
-Each executed transaction produces a receipt stored alongside the block:
+Implemented shape:
 
 ```rust
 pub struct Receipt {
-    pub tx_hash: Hash,
+    pub tx_hash: [u8; 32],
     pub success: bool,
     pub gas_used: u64,
     pub logs: Vec<String>,
-    pub error: Option<String>,   // set on revert
+    pub error: Option<String>,
 }
 ```
 
-Receipts are not part of the block hash in v1 (no receipt trie). They are informational.
+Receipts are stored on `Blockchain` as `Vec<Vec<Receipt>>`, one receipt list per mined block.
+
+Receipts are informational in v1 and are not part of block hashing.
 
 ## Changes to Existing Types
 
 ### Blockchain
+
+Implemented shape:
 
 ```rust
 pub struct Blockchain {
     pub chain: Vec<Block>,
     pub pending_transactions: Vec<Transaction>,
     pub difficulty: u32,
-    pub state: WorldState,           // new
-    pub receipts: Vec<Vec<Receipt>>, // new: per-block receipts
-    vm: VmEngine,                    // new: shared wasmtime engine + cache
+    pub state: WorldState,
+    pub vm: VmEngine,
+    pub receipts: Vec<Vec<Receipt>>,
 }
 ```
 
 ### Block
 
-No structural changes. Blocks still contain `Vec<Transaction>`. The transaction struct changes (see above) but the block format is unchanged.
+No structural smart-contract-specific changes were required. Blocks still contain transactions.
 
 ### Validation
 
-`is_valid` gains a new check: re-execute all transactions against a fresh state and verify the resulting state root matches. (State root hashing deferred to a future RFC — v1 just re-validates execution doesn't error.)
+The RFC proposed extending `is_valid` to re-execute transactions against fresh state. That has not landed yet.
 
-## Project Layout (additions)
+Current implementation validates:
 
-```
+- genesis `prev_hash`
+- proof-of-work difficulty
+- previous-hash linkage
+
+State replay validation and state-root style validation remain future work.
+
+## Project Layout
+
+Implemented additions include:
+
+```text
 blocky/
   src/
+    call_abi.rs       # CallEnvelope re-export and decoding helpers
+    receipt.rs        # Execution receipts
     state.rs          # WorldState, AccountState
+    transaction.rs    # Address and Payload transaction model
     vm/
-      mod.rs          # VmEngine: wasmtime setup, module cache
+      mod.rs          # VmEngine, module cache, execution flow
       host.rs         # Host function implementations
-      gas.rs          # Gas cost constants
-    transaction.rs    # Updated: Payload enum, Address type
-  blocky-sdk/         # Separate crate (or workspace member)
-    Cargo.toml        # targets wasm32-unknown-unknown
+      gas.rs          # Gas constants
+  blocky-sdk/
+    Cargo.toml
     src/
-      lib.rs          # Safe wrappers around host functions
-      storage.rs      # Typed storage helpers
+      lib.rs          # Contract-side helpers and host wrappers
 ```
 
 ## New Dependencies
+
+Key dependencies introduced by this RFC's implementation:
 
 | Crate | Purpose |
 |---|---|
@@ -300,30 +314,68 @@ blocky/
 
 ## Out of Scope (v1 contracts)
 
+Still out of scope unless later RFCs say otherwise:
+
 - Cross-contract calls
 - Contract upgrades / proxy patterns
-- Events/indexing beyond simple logs
+- Events or indexing beyond simple receipt logs
 - Public-key signatures on transactions
-- State root / Merkle proof
-- Persistent storage (chain is in-memory)
-- Contract standards (ERC-20 equivalents)
-- Wasm validation beyond wasmtime's built-in checks
+- State roots / Merkle proofs
+- Persistent storage
+- Contract standards
+- Additional Wasm validation policy beyond runtime checks already in place
 
 ## Implementation Order
 
-1. **World state + balance tracking** — `state.rs`, update `Blockchain` to maintain state
-2. **Transaction type refactor** — `Payload` enum, `Address` type, Borsh derives
-3. **VM scaffold** — `vm/mod.rs`, wasmtime `Engine` + `Linker` setup
-4. **Host functions** — `vm/host.rs`, wire into linker
-5. **Deploy + Call execution** — integrate VM into `mine_pending` / `apply_block`
-6. **Gas metering** — fuel limits, cost table
-7. **Receipts** — capture results per transaction
-8. **SDK crate** — `blocky-sdk` with safe wrappers
-9. **REPL commands** — `deploy <path>`, `call <addr> <method> [args]`
+The proposed order in this RFC closely matched reality:
+
+1. world state and balance tracking
+2. payload-based transactions
+3. VM scaffold
+4. host functions
+5. deploy and call execution
+6. gas metering
+7. receipts
+8. SDK crate
+9. REPL contract commands
+
+## Implementation Notes
+
+This RFC has been substantially implemented.
+
+Key outcomes that are now present in the codebase:
+
+- world state and account storage
+- balance-aware transaction admission
+- deterministic contract address derivation
+- Wasm execution through wasmtime
+- cached modules by code hash
+- structured call envelopes
+- contract SDK helpers
+- gas metering
+- execution receipts
+- failure propagation and atomic mining behavior
+
+## Accepted Deviations
+
+### Validation is narrower than proposed
+
+The RFC proposed replay-based validation in `is_valid`. Current code does not yet re-execute transactions during validation.
+
+### Receipts live on `Blockchain`
+
+The RFC described receipts as stored alongside blocks. The implemented model stores them on `Blockchain` in a parallel `Vec<Vec<Receipt>>`.
+
+### ABI details are code-defined
+
+The RFC specified host behavior at a conceptual level. The exact ABI, import names, and call-envelope framing are now best understood from `src/vm/host.rs`, `src/call_abi.rs`, and `blocky-sdk/src/lib.rs`.
 
 ## Open Questions
 
-1. **Memory limits** — Should we cap Wasm linear memory? (Probably yes, e.g. 1 MB.)
-2. **Code size limits** — Max bytecode size per deploy? (Suggested: 256 KB.)
-3. **Storage limits** — Per-contract storage cap, or just gas-metered writes?
-4. **Address format** — Stay with raw `[u8; 32]` or introduce a human-readable encoding (bech32, base58)?
+These remain good follow-up topics:
+
+1. **Memory limits** — should Wasm linear memory be capped explicitly?
+2. **Code size limits** — should deploys enforce a maximum bytecode size?
+3. **Storage limits** — should storage be capped beyond gas pricing?
+4. **Address format** — should human-readable encodings be added?
+5. **Validation semantics** — should `is_valid` grow replay-based state validation?

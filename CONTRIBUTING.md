@@ -27,3 +27,4 @@ Thanks for contributing to Blocky.
 - Keep changes focused and commit in logical parts
 - Prefer `tracing` over `println!`
 - Run the checks above before opening a pull request
+- For major architecture or semantics changes, write or update an RFC in `docs/`; see `docs/rfc-process.md`
