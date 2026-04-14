@@ -54,7 +54,7 @@ pub fn decode_args<T: BorshDeserialize>() -> Result<T, String> {
 }
 
 pub fn log(message: &str) {
-    unsafe { env::log(message.as_ptr(), message.len() as i64) }
+    unsafe { env::host_log(message.as_ptr(), message.len() as i32) }
 }
 
 pub fn balance() -> u64 {
@@ -131,10 +131,11 @@ pub mod storage {
 }
 
 pub(crate) fn panic_abort(message: &str) -> ! {
-    unsafe { env::abort(message.as_ptr(), message.len() as i32) }
+    unsafe { env::host_abort(message.as_ptr(), message.len() as i32) }
 }
 
 pub mod env {
+    #[link(wasm_import_module = "env")]
     unsafe extern "C" {
         pub fn input_len() -> i32;
         pub fn read_input(out_ptr: *mut u8) -> i32;
@@ -146,8 +147,10 @@ pub mod env {
         pub fn get_deposit() -> i64;
         #[link_name = "transfer"]
         pub fn env_transfer(to_ptr: *const u8, amount: i64) -> i32;
-        pub fn log(msg_ptr: *const u8, msg_len: i64);
-        pub fn abort(msg_ptr: *const u8, msg_len: i32) -> !;
+        #[link_name = "log"]
+        pub fn host_log(msg_ptr: *const u8, msg_len: i32);
+        #[link_name = "abort"]
+        pub fn host_abort(msg_ptr: *const u8, msg_len: i32) -> !;
     }
 }
 
@@ -256,7 +259,7 @@ mod tests {
     }
 
     #[unsafe(no_mangle)]
-    extern "C" fn log(msg_ptr: *const u8, msg_len: i64) {
+    extern "C" fn log(msg_ptr: *const u8, msg_len: i32) {
         let bytes = unsafe { std::slice::from_raw_parts(msg_ptr, msg_len.max(0) as usize) };
         host()
             .lock()

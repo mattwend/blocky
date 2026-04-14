@@ -148,7 +148,6 @@ pub extern "C" fn noop() {}
 }
 
 #[test]
-#[ignore = "known failing sdk host wrapper signature mismatch path under wasmtime"]
 fn sdk_log_only_contract_succeeds() {
     let source = r#"
 use blocky_sdk::log;
@@ -221,7 +220,6 @@ pub extern "C" fn explode() {
 }
 
 #[test]
-#[ignore = "known failing richer sdk wrapper path under wasmtime; isolate unreachable trap separately"]
 fn sdk_wrappers_log_and_query_context() {
     let source = r#"
 use blocky_sdk::log;
@@ -249,11 +247,10 @@ pub extern "C" fn inspect() {
 }
 
 #[test]
-#[ignore = "known failing richer sdk wrapper path under wasmtime; isolate unreachable trap separately"]
 fn sdk_typed_storage_round_trips_plain_value() {
     let source = r#"
 use blocky_sdk::{decode_args, log, storage};
-use borsh::{BorshDeserialize, BorshSerialize};
+use borsh::BorshDeserialize;
 
 #[derive(BorshDeserialize)]
 struct SetArgs {
@@ -312,7 +309,6 @@ pub extern "C" fn clear() {
 }
 
 #[test]
-#[ignore = "known failing richer sdk wrapper path under wasmtime; isolate unreachable trap separately"]
 fn sdk_transfer_wrapper_moves_balance() {
     let source = r#"
 use blocky_sdk::{caller, log, transfer};
