@@ -5,7 +5,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use blocky::{Blockchain, Transaction, address_from_name};
+use blocky::{Address, Blockchain, Transaction, address_from_name};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -108,6 +108,13 @@ fn queue_and_mine(chain: &mut Blockchain, tx: Transaction) {
     chain.mine_pending().unwrap();
 }
 
+fn deploy_contract(chain: &mut Blockchain, sender: Address, nonce: u64, wasm: Vec<u8>) -> Address {
+    let deploy = Transaction::new_deploy(sender, nonce, wasm);
+    let contract = deploy.derived_contract_address();
+    queue_and_mine(chain, deploy);
+    contract
+}
+
 #[test]
 fn sdk_panic_handler_aborts_and_reverts_state_changes() {
     let wasm = build_contract_source(
@@ -128,9 +135,7 @@ pub extern "C" fn explode() {
     chain.credit_balance(alice, 5_000_000);
     assert!(wasm.starts_with(b"\0asm"));
 
-    let deploy = Transaction::new_deploy(alice, 0, wasm);
-    let contract = deploy.derived_contract_address();
-    queue_and_mine(&mut chain, deploy);
+    let contract = deploy_contract(&mut chain, alice, 0, wasm);
 
     let call = Transaction::new_call(alice, 1, contract, "explode", Vec::new(), 13);
     chain.add_transaction(call.clone()).unwrap();
@@ -156,3 +161,4 @@ pub extern "C" fn explode() {
     );
     assert!(receipt.logs.is_empty());
 }
+
