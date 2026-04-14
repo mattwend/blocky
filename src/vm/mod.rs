@@ -17,6 +17,17 @@ pub struct VmEngine {
     module_cache: HashMap<Hash, Arc<Module>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct CallRequest<'a> {
+    pub state: crate::WorldState,
+    pub caller: Address,
+    pub contract: Address,
+    pub deposit: u64,
+    pub method: &'a str,
+    pub args: &'a [u8],
+    pub code: &'a [u8],
+}
+
 #[derive(Debug, Error)]
 pub enum VmError {
     #[error("failed to configure wasmtime engine: {0}")]
@@ -77,32 +88,23 @@ impl VmEngine {
             .ok_or_else(|| VmError::EngineConfig(wasmtime::Error::msg("cached module missing")))
     }
 
-    pub fn execute_call(
-        &mut self,
-        state: crate::WorldState,
-        caller: Address,
-        contract: Address,
-        deposit: u64,
-        method: &str,
-        args: &[u8],
-        code: &[u8],
-    ) -> Result<ExecutionContext, VmError> {
-        let module = self.prepare_module(code)?;
+    pub fn execute_call(&mut self, request: CallRequest<'_>) -> Result<ExecutionContext, VmError> {
+        let module = self.prepare_module(request.code)?;
         let host_state = VmHostState {
-            state,
+            state: request.state,
             context: Some(ExecutionContext::new(
-                caller,
-                contract,
-                deposit,
-                args.to_vec(),
+                request.caller,
+                request.contract,
+                request.deposit,
+                request.args.to_vec(),
             )),
         };
         let mut store = Store::new(&self.engine, host_state);
         store.set_fuel(1_000_000)?;
         let instance = self.linker.instantiate(&mut store, &module)?;
         let function = instance
-            .get_func(&mut store, method)
-            .ok_or_else(|| VmError::MissingMethod(method.to_string()))?;
+            .get_func(&mut store, request.method)
+            .ok_or_else(|| VmError::MissingMethod(request.method.to_string()))?;
         if let Err(error) = function.call(&mut store, &[], &mut []) {
             let message = store
                 .data()
@@ -132,30 +134,24 @@ impl VmEngine {
 
     pub fn execute_call_with_state(
         &mut self,
-        state: crate::WorldState,
-        caller: Address,
-        contract: Address,
-        deposit: u64,
-        method: &str,
-        args: &[u8],
-        code: &[u8],
+        request: CallRequest<'_>,
     ) -> Result<(crate::WorldState, ExecutionContext), VmError> {
-        let module = self.prepare_module(code)?;
+        let module = self.prepare_module(request.code)?;
         let host_state = VmHostState {
-            state,
+            state: request.state,
             context: Some(ExecutionContext::new(
-                caller,
-                contract,
-                deposit,
-                args.to_vec(),
+                request.caller,
+                request.contract,
+                request.deposit,
+                request.args.to_vec(),
             )),
         };
         let mut store = Store::new(&self.engine, host_state);
         store.set_fuel(1_000_000)?;
         let instance = self.linker.instantiate(&mut store, &module)?;
         let function = instance
-            .get_func(&mut store, method)
-            .ok_or_else(|| VmError::MissingMethod(method.to_string()))?;
+            .get_func(&mut store, request.method)
+            .ok_or_else(|| VmError::MissingMethod(request.method.to_string()))?;
         if let Err(error) = function.call(&mut store, &[], &mut []) {
             let message = store
                 .data()
@@ -213,7 +209,7 @@ pub fn code_hash(code: &[u8]) -> Hash {
 
 #[cfg(test)]
 mod tests {
-    use super::{VmEngine, code_hash};
+    use super::{CallRequest, VmEngine, code_hash};
     use crate::transaction::address_from_name;
 
     const EMPTY_MODULE: &[u8] = &[0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
@@ -247,15 +243,15 @@ mod tests {
         let contract = address_from_name("contract");
 
         let (_, context) = vm
-            .execute_call_with_state(
-                crate::WorldState::new(),
+            .execute_call_with_state(CallRequest {
+                state: crate::WorldState::new(),
                 caller,
                 contract,
-                0,
-                "noop",
-                &[],
-                NOOP_MODULE,
-            )
+                deposit: 0,
+                method: "noop",
+                args: &[],
+                code: NOOP_MODULE,
+            })
             .unwrap();
 
         assert_eq!(context.caller, caller);

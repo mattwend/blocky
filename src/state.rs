@@ -5,26 +5,15 @@ use thiserror::Error;
 use crate::{
     Address, Block, CallEnvelope, ExecutionContext,
     transaction::{Payload, Transaction},
-    vm::VmError,
+    vm::{CallRequest, VmError},
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AccountState {
     pub balance: u64,
     pub nonce: u64,
     pub code: Option<Vec<u8>>,
     pub storage: BTreeMap<Vec<u8>, Vec<u8>>,
-}
-
-impl Default for AccountState {
-    fn default() -> Self {
-        Self {
-            balance: 0,
-            nonce: 0,
-            code: None,
-            storage: BTreeMap::new(),
-        }
-    }
 }
 
 #[derive(Debug, Error)]
@@ -107,7 +96,7 @@ impl WorldState {
     pub fn apply_transaction_with_vm(
         &mut self,
         transaction: &Transaction,
-        mut vm: Option<&mut crate::VmEngine>,
+        vm: Option<&mut crate::VmEngine>,
     ) -> Result<ExecutionContext, StateError> {
         let sender = transaction.sender;
         let expected_nonce = self
@@ -151,16 +140,16 @@ impl WorldState {
                 let mut working_state = self.clone();
                 working_state.transfer(&sender, contract, *deposit)?;
 
-                if let Some(vm) = vm.as_deref_mut() {
-                    let (next_state, vm_context) = vm.execute_call_with_state(
-                        working_state,
-                        sender,
-                        *contract,
-                        *deposit,
+                if let Some(vm) = vm {
+                    let (next_state, vm_context) = vm.execute_call_with_state(CallRequest {
+                        state: working_state,
+                        caller: sender,
+                        contract: *contract,
+                        deposit: *deposit,
                         method,
-                        &input,
-                        &code,
-                    )?;
+                        args: &input,
+                        code: &code,
+                    })?;
                     *self = next_state;
                     context = vm_context;
                 } else {

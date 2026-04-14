@@ -158,7 +158,7 @@ pub fn link_host_functions(linker: &mut Linker<VmHostState>) -> Result<(), wasmt
                 context.revert_message = Some(message.clone());
             }
 
-            Err(anyhow!(message).into())
+            Err(anyhow!(message))
         },
     )?;
     Ok(())
