@@ -14,6 +14,15 @@ pub struct Receipt {
 }
 
 impl Receipt {
+    /// Creates a successful receipt for a transaction.
+    ///
+    /// # Arguments
+    /// - `transaction`: Transaction the receipt corresponds to.
+    /// - `gas_used`: Total gas charged during execution.
+    /// - `logs`: Log lines emitted during execution.
+    ///
+    /// # Returns
+    /// A receipt marked as successful.
     pub fn success(transaction: &Transaction, gas_used: u64, logs: Vec<String>) -> Self {
         Self {
             tx_hash: transaction_hash(transaction),
@@ -24,6 +33,15 @@ impl Receipt {
         }
     }
 
+    /// Creates a failed receipt for a transaction.
+    ///
+    /// # Arguments
+    /// - `transaction`: Transaction the receipt corresponds to.
+    /// - `gas_used`: Total gas charged before the failure was reported.
+    /// - `error`: Human-readable failure description.
+    ///
+    /// # Returns
+    /// A receipt marked as failed.
     pub fn failure(transaction: &Transaction, gas_used: u64, error: impl Into<String>) -> Self {
         Self {
             tx_hash: transaction_hash(transaction),
@@ -35,6 +53,13 @@ impl Receipt {
     }
 }
 
+/// Computes a deterministic hash for a transaction.
+///
+/// # Arguments
+/// - `transaction`: Transaction to hash.
+///
+/// # Returns
+/// A 32-byte SHA-256 digest of the transaction's Borsh encoding.
 pub fn transaction_hash(transaction: &Transaction) -> [u8; 32] {
     let bytes = borsh::to_vec(transaction)
         .expect("borsh serialization of a fully-owned Transaction should not fail");

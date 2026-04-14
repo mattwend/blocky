@@ -6,18 +6,36 @@ use crate::{Address, WorldState};
 
 use super::gas::{STORAGE_READ_COST, STORAGE_REMOVE_COST, STORAGE_WRITE_COST, TRANSFER_COST};
 
+/// Runtime context captured for a contract execution.
 #[derive(Debug, Clone)]
 pub struct ExecutionContext {
+    /// External account that initiated the call.
     pub caller: Address,
+    /// Contract currently being executed.
     pub contract: Address,
+    /// Balance transferred into the contract before execution.
     pub deposit: u64,
+    /// Raw input bytes visible to the guest.
     pub args: Vec<u8>,
+    /// Whether execution requested a revert/abort.
     pub reverted: bool,
+    /// Optional revert message captured from the guest.
     pub revert_message: Option<String>,
+    /// Log lines emitted by the guest.
     pub logs: Vec<String>,
 }
 
 impl ExecutionContext {
+    /// Creates a fresh execution context for a contract call.
+    ///
+    /// # Arguments
+    /// - `caller`: External account that initiated the call.
+    /// - `contract`: Contract address being executed.
+    /// - `deposit`: Balance transferred into the contract before execution.
+    /// - `args`: Raw input bytes passed to the guest.
+    ///
+    /// # Returns
+    /// A clean execution context with no logs or revert status.
     pub fn new(caller: Address, contract: Address, deposit: u64, args: Vec<u8>) -> Self {
         Self {
             caller,
@@ -31,12 +49,16 @@ impl ExecutionContext {
     }
 }
 
+/// Mutable host state stored inside a Wasmtime store during execution.
 #[derive(Debug, Clone, Default)]
 pub struct VmHostState {
+    /// World state being mutated by the guest call.
     pub state: WorldState,
+    /// Current execution context, if one has been initialized.
     pub context: Option<ExecutionContext>,
 }
 
+/// Errors raised by VM host functions when interacting with guest memory or state.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum HostError {
     #[error("guest memory export \"memory\" is missing")]
@@ -51,6 +73,13 @@ pub enum HostError {
     Gas(String),
 }
 
+/// Registers all host functions exposed to guest Wasm contracts.
+///
+/// # Arguments
+/// - `linker`: Linker to populate with `env` imports.
+///
+/// # Returns
+/// `Ok(())` if all functions were registered successfully, or a Wasmtime error otherwise.
 pub fn link_host_functions(linker: &mut Linker<VmHostState>) -> Result<(), wasmtime::Error> {
     linker.func_wrap(
         "env",
@@ -166,6 +195,16 @@ pub fn link_host_functions(linker: &mut Linker<VmHostState>) -> Result<(), wasmt
     Ok(())
 }
 
+/// Reads a contract storage value into guest memory.
+///
+/// # Arguments
+/// - `caller`: Active Wasmtime caller for the guest instance.
+/// - `key_ptr`: Pointer to the storage key in guest memory.
+/// - `key_len`: Length of the storage key in bytes.
+/// - `val_ptr`: Pointer where the storage value should be written.
+///
+/// # Returns
+/// The value length when the key exists, `None` when absent, or a host error.
 pub fn storage_read(
     caller: &mut Caller<'_, VmHostState>,
     key_ptr: i32,
@@ -191,6 +230,17 @@ pub fn storage_read(
     }
 }
 
+/// Writes a contract storage value from guest memory.
+///
+/// # Arguments
+/// - `caller`: Active Wasmtime caller for the guest instance.
+/// - `key_ptr`: Pointer to the storage key in guest memory.
+/// - `key_len`: Length of the storage key in bytes.
+/// - `val_ptr`: Pointer to the value bytes in guest memory.
+/// - `val_len`: Length of the value in bytes.
+///
+/// # Returns
+/// `Ok(())` if the value was written successfully, or a host error.
 pub fn storage_write(
     caller: &mut Caller<'_, VmHostState>,
     key_ptr: i32,
@@ -211,6 +261,15 @@ pub fn storage_write(
     Ok(())
 }
 
+/// Removes a contract storage key.
+///
+/// # Arguments
+/// - `caller`: Active Wasmtime caller for the guest instance.
+/// - `key_ptr`: Pointer to the storage key in guest memory.
+/// - `key_len`: Length of the storage key in bytes.
+///
+/// # Returns
+/// `true` if a value was removed, `false` if the key was absent, or a host error.
 pub fn storage_remove(
     caller: &mut Caller<'_, VmHostState>,
     key_ptr: i32,
@@ -229,20 +288,51 @@ pub fn storage_remove(
     Ok(removed)
 }
 
+/// Returns the executing contract's balance.
+///
+/// # Arguments
+/// - `caller`: Active Wasmtime caller for the guest instance.
+///
+/// # Returns
+/// The current contract balance, or a host error.
 pub fn get_balance(caller: &Caller<'_, VmHostState>) -> Result<u64, HostError> {
     let contract = execution_context(caller)?.contract;
     Ok(caller.data().state.get_balance(&contract))
 }
 
+/// Writes the external caller address into guest memory.
+///
+/// # Arguments
+/// - `caller`: Active Wasmtime caller for the guest instance.
+/// - `out_ptr`: Pointer where the 32-byte caller address should be written.
+///
+/// # Returns
+/// `Ok(())` if the address was written successfully, or a host error.
 pub fn get_caller(caller: &mut Caller<'_, VmHostState>, out_ptr: i32) -> Result<(), HostError> {
     let address = execution_context(caller)?.caller;
     write_memory(caller, out_ptr, &address)
 }
 
+/// Returns the deposit transferred into the current contract call.
+///
+/// # Arguments
+/// - `caller`: Active Wasmtime caller for the guest instance.
+///
+/// # Returns
+/// The current call deposit, or a host error.
 pub fn get_deposit(caller: &Caller<'_, VmHostState>) -> Result<u64, HostError> {
     Ok(execution_context(caller)?.deposit)
 }
 
+/// Transfers balance from the executing contract to another address.
+///
+/// # Arguments
+/// - `caller`: Active Wasmtime caller for the guest instance.
+/// - `to_ptr`: Pointer to the 32-byte destination address in guest memory.
+/// - `amount`: Amount of balance to transfer.
+///
+/// # Returns
+/// `Ok(())` if the transfer succeeds, or a host error.
 pub fn transfer(
     caller: &mut Caller<'_, VmHostState>,
     to_ptr: i32,
@@ -259,11 +349,26 @@ pub fn transfer(
     Ok(())
 }
 
+/// Returns the length of the current call input.
+///
+/// # Arguments
+/// - `caller`: Active Wasmtime caller for the guest instance.
+///
+/// # Returns
+/// The input length in bytes, or a host error.
 pub fn input_len(caller: &Caller<'_, VmHostState>) -> Result<i32, HostError> {
     let len = execution_context(caller)?.args.len();
     i32::try_from(len).map_err(|_| HostError::OutOfBounds)
 }
 
+/// Writes the current call input into guest memory.
+///
+/// # Arguments
+/// - `caller`: Active Wasmtime caller for the guest instance.
+/// - `out_ptr`: Pointer where the input bytes should be written.
+///
+/// # Returns
+/// The number of bytes written, or a host error.
 pub fn read_input(caller: &mut Caller<'_, VmHostState>, out_ptr: i32) -> Result<usize, HostError> {
     let args = execution_context(caller)?.args.clone();
     write_memory(caller, out_ptr, &args)?;

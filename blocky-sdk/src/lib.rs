@@ -5,13 +5,24 @@ use std::{string::String, vec, vec::Vec};
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
+/// Structured input passed from the host into a contract call.
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct CallEnvelope {
+    /// Exported guest method to invoke.
     pub method: String,
+    /// Method-specific encoded arguments.
     pub args: Vec<u8>,
 }
 
 impl CallEnvelope {
+    /// Creates a new call envelope.
+    ///
+    /// # Arguments
+    /// - `method`: Exported guest method to invoke.
+    /// - `args`: Encoded method-specific arguments.
+    ///
+    /// # Returns
+    /// A new call envelope.
     pub fn new(method: impl Into<String>, args: Vec<u8>) -> Self {
         Self {
             method: method.into(),
@@ -19,15 +30,30 @@ impl CallEnvelope {
         }
     }
 
+    /// Encodes the envelope using Borsh.
+    ///
+    /// # Returns
+    /// The Borsh-encoded envelope bytes.
     pub fn encode(&self) -> Vec<u8> {
         borsh::to_vec(self).expect("call envelope serialization should succeed")
     }
 
+    /// Decodes a Borsh-encoded call envelope.
+    ///
+    /// # Arguments
+    /// - `bytes`: Raw bytes to decode.
+    ///
+    /// # Returns
+    /// The decoded envelope, or a stringified decode error.
     pub fn decode(bytes: &[u8]) -> Result<Self, String> {
         borsh::from_slice(bytes).map_err(|error| error.to_string())
     }
 }
 
+/// Reads the raw input bytes for the current contract call.
+///
+/// # Returns
+/// The current call input, or an empty vector if no input is available.
 pub fn input() -> Vec<u8> {
     let len = unsafe { env::input_len() };
     if len <= 0 {
@@ -44,42 +70,82 @@ pub fn input() -> Vec<u8> {
     bytes
 }
 
+/// Reads and decodes the current call input as a [`CallEnvelope`].
+///
+/// # Returns
+/// The decoded envelope, or a decode error string.
 pub fn call_envelope() -> Result<CallEnvelope, String> {
     CallEnvelope::decode(&input())
 }
 
+/// Decodes typed arguments from the current call envelope.
+///
+/// # Returns
+/// The decoded argument value, or a decode error string.
 pub fn decode_args<T: BorshDeserialize>() -> Result<T, String> {
     let envelope = call_envelope()?;
     borsh::from_slice(&envelope.args).map_err(|error| error.to_string())
 }
 
+/// Emits a log line through the host.
+///
+/// # Arguments
+/// - `message`: UTF-8 message to append to the receipt logs.
 pub fn log(message: &str) {
     unsafe { env::host_log(message.as_ptr(), message.len() as i32) }
 }
 
+/// Returns the executing contract's balance.
+///
+/// # Returns
+/// The current contract balance.
 pub fn balance() -> u64 {
     unsafe { env::get_balance() as u64 }
 }
 
+/// Returns the deposit attached to the current call.
+///
+/// # Returns
+/// The amount transferred into the contract before execution.
 pub fn deposit() -> u64 {
     unsafe { env::get_deposit() as u64 }
 }
 
+/// Returns the external caller address for the current execution.
+///
+/// # Returns
+/// The 32-byte caller address.
 pub fn caller() -> [u8; 32] {
     let mut address = [0_u8; 32];
     unsafe { env::get_caller(address.as_mut_ptr()) };
     address
 }
 
+/// Transfers balance from the executing contract to another address.
+///
+/// # Arguments
+/// - `to`: Destination address.
+/// - `amount`: Amount of balance to transfer.
+///
+/// # Returns
+/// `true` when the transfer succeeds, otherwise `false`.
 pub fn transfer(to: &[u8; 32], amount: u64) -> bool {
     unsafe { env::env_transfer(to.as_ptr(), amount as i64) == 0 }
 }
 
+/// Typed helpers for reading and writing contract storage.
 pub mod storage {
     use super::env;
     use borsh::{BorshDeserialize, BorshSerialize};
     use std::vec;
 
+    /// Reads and decodes a typed value from contract storage.
+    ///
+    /// # Arguments
+    /// - `key`: Storage key to read.
+    ///
+    /// # Returns
+    /// The decoded value if present and decodable, otherwise `None`.
     pub fn read<K, V>(key: K) -> Option<V>
     where
         K: AsRef<[u8]>,
@@ -103,6 +169,11 @@ pub mod storage {
         borsh::from_slice(&bytes).ok()
     }
 
+    /// Encodes and writes a typed value into contract storage.
+    ///
+    /// # Arguments
+    /// - `key`: Storage key to write.
+    /// - `value`: Typed value to encode and persist.
     pub fn write<K, V>(key: K, value: &V)
     where
         K: AsRef<[u8]>,
@@ -121,6 +192,13 @@ pub mod storage {
         }
     }
 
+    /// Removes a value from contract storage.
+    ///
+    /// # Arguments
+    /// - `key`: Storage key to delete.
+    ///
+    /// # Returns
+    /// `true` if a value existed and was removed, otherwise `false`.
     pub fn remove<K>(key: K) -> bool
     where
         K: AsRef<[u8]>,
@@ -134,6 +212,7 @@ pub(crate) fn panic_abort(message: &str) -> ! {
     unsafe { env::host_abort(message.as_ptr(), message.len() as i32) }
 }
 
+/// Raw host imports exposed by the runtime.
 pub mod env {
     #[link(wasm_import_module = "env")]
     unsafe extern "C" {

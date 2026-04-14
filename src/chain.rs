@@ -11,6 +11,7 @@ use crate::{
     },
 };
 
+/// Errors produced while building, validating, or executing the blockchain.
 #[derive(Debug, Error)]
 pub enum BlockyError {
     #[error("cannot mine a block without pending transactions")]
@@ -27,16 +28,30 @@ pub enum BlockyError {
     Vm(#[from] VmError),
 }
 
+/// An in-memory blockchain with pending transactions, receipts, world state, and VM.
 pub struct Blockchain {
+    /// Confirmed blocks, including genesis at index `0`.
     pub chain: Vec<Block>,
+    /// Transactions waiting to be mined into the next block.
     pub pending_transactions: Vec<Transaction>,
+    /// Proof-of-work difficulty measured in leading zero bits.
     pub difficulty: u32,
+    /// Current world state after applying all confirmed blocks.
     pub state: WorldState,
+    /// Wasm execution engine used for contract calls.
     pub vm: VmEngine,
+    /// Receipts grouped by mined block, excluding genesis.
     pub receipts: Vec<Vec<Receipt>>,
 }
 
 impl Blockchain {
+    /// Creates a new blockchain, panicking if VM initialization fails.
+    ///
+    /// # Arguments
+    /// - `difficulty`: Proof-of-work difficulty measured in leading zero bits.
+    ///
+    /// # Returns
+    /// A blockchain initialized with a mined genesis block.
     pub fn new(difficulty: u32) -> Self {
         match Self::try_new(difficulty) {
             Ok(blockchain) => blockchain,
@@ -44,6 +59,13 @@ impl Blockchain {
         }
     }
 
+    /// Creates a new blockchain with a mined genesis block.
+    ///
+    /// # Arguments
+    /// - `difficulty`: Proof-of-work difficulty measured in leading zero bits.
+    ///
+    /// # Returns
+    /// A new blockchain, or an error if initialization fails.
     pub fn try_new(difficulty: u32) -> Result<Self, BlockyError> {
         let mut genesis = Block::new(Vec::new(), [0_u8; 32]);
         genesis.mine(difficulty)?;
@@ -58,12 +80,26 @@ impl Blockchain {
         })
     }
 
+    /// Adds balance to an address without creating a transaction.
+    ///
+    /// This is mainly useful for demos and tests.
+    ///
+    /// # Arguments
+    /// - `address`: Address to credit.
+    /// - `amount`: Amount to add to the existing balance.
     pub fn credit_balance(&mut self, address: Address, amount: u64) {
         let current = self.state.get_balance(&address);
         self.state
             .set_balance(&address, current.saturating_add(amount));
     }
 
+    /// Validates and queues a transaction for inclusion in the next mined block.
+    ///
+    /// # Arguments
+    /// - `tx`: Transaction to queue.
+    ///
+    /// # Returns
+    /// `Ok(())` if the transaction was accepted, or a validation error otherwise.
     pub fn add_transaction(&mut self, tx: Transaction) -> Result<(), BlockyError> {
         let expected_nonce = self
             .state
@@ -109,6 +145,10 @@ impl Blockchain {
         Ok(())
     }
 
+    /// Mines all pending transactions into a new block and applies them to state.
+    ///
+    /// # Returns
+    /// The newly mined block, or an error if mining or execution fails.
     pub fn mine_pending(&mut self) -> Result<Block, BlockyError> {
         if self.pending_transactions.is_empty() {
             return Err(BlockyError::NoPendingTransactions);
@@ -152,6 +192,10 @@ impl Blockchain {
         Ok(block)
     }
 
+    /// Checks block linkage and proof-of-work validity for the current chain.
+    ///
+    /// # Returns
+    /// `Ok(true)` for a valid chain, `Ok(false)` for an invalid chain, or an error if hashing fails.
     pub fn is_valid(&self) -> Result<bool, BlockyError> {
         let Some(genesis) = self.chain.first() else {
             return Ok(false);

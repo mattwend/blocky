@@ -1,7 +1,9 @@
+/// Shared call payload envelope used by the host and contracts.
 pub use blocky_sdk::CallEnvelope;
 
 use thiserror::Error;
 
+/// Errors returned when decoding structured contract call input.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum CallAbiError {
     #[error("call envelope is empty")]
@@ -10,6 +12,13 @@ pub enum CallAbiError {
     Decode(String),
 }
 
+/// Decodes a Borsh-encoded [`CallEnvelope`] and rejects empty payloads.
+///
+/// # Arguments
+/// - `bytes`: Raw input bytes passed to a contract call.
+///
+/// # Returns
+/// The decoded call envelope, or a validation/decoding error.
 pub fn decode_checked(bytes: &[u8]) -> Result<CallEnvelope, CallAbiError> {
     if bytes.is_empty() {
         return Err(CallAbiError::Empty);

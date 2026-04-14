@@ -1,3 +1,16 @@
+//! Blocky is a small educational blockchain and smart-contract playground written in Rust.
+//!
+//! The crate is organized into a few learner-friendly layers:
+//! - [`transaction`] defines addresses and transaction payloads.
+//! - [`block`] defines mined blocks and proof-of-work hashing helpers.
+//! - [`state`] applies transactions to an in-memory world state.
+//! - [`chain`] ties blocks, pending transactions, receipts, and validation together.
+//! - [`vm`] executes Wasm smart contracts against the world state.
+//! - [`call_abi`] exposes the Borsh call envelope shared with `blocky-sdk`.
+//!
+//! If you are exploring the project for the first time, a good path is:
+//! [`Transaction`] -> [`Block`] -> [`WorldState`] -> [`Blockchain`] -> [`VmEngine`].
+
 pub mod app;
 pub mod block;
 pub mod call_abi;

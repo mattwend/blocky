@@ -11,14 +11,20 @@ use crate::{
     },
 };
 
+/// State stored for a single account or contract.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AccountState {
+    /// Native token balance.
     pub balance: u64,
+    /// Next expected outgoing transaction nonce.
     pub nonce: u64,
+    /// Optional deployed Wasm bytecode for contract accounts.
     pub code: Option<Vec<u8>>,
+    /// Contract key-value storage.
     pub storage: BTreeMap<Vec<u8>, Vec<u8>>,
 }
 
+/// Errors produced while mutating or validating world state transitions.
 #[derive(Debug, Error)]
 pub enum StateError {
     #[error("insufficient balance: available {available}, required {required}")]
@@ -33,34 +39,74 @@ pub enum StateError {
     Vm(#[from] VmError),
 }
 
+/// In-memory account and contract state for the whole chain.
 #[derive(Debug, Clone, Default)]
 pub struct WorldState {
     accounts: HashMap<Address, AccountState>,
 }
 
 impl WorldState {
+    /// Creates an empty world state.
+    ///
+    /// # Returns
+    /// A new world state with no accounts.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Returns the current state for an address, if it exists.
+    ///
+    /// # Arguments
+    /// - `addr`: Address to look up.
+    ///
+    /// # Returns
+    /// The account state for `addr`, or `None` if the account does not exist.
     pub fn get_account(&self, addr: &Address) -> Option<&AccountState> {
         self.accounts.get(addr)
     }
 
+    /// Returns mutable account state, creating a default entry when missing.
+    ///
+    /// # Arguments
+    /// - `addr`: Address to fetch or create.
+    ///
+    /// # Returns
+    /// A mutable reference to the account state for `addr`.
     pub fn get_or_create(&mut self, addr: &Address) -> &mut AccountState {
         self.accounts.entry(*addr).or_default()
     }
 
+    /// Returns an address balance, or `0` for unknown accounts.
+    ///
+    /// # Arguments
+    /// - `addr`: Address whose balance should be read.
+    ///
+    /// # Returns
+    /// The current balance for `addr`, or `0` if the account does not exist.
     pub fn get_balance(&self, addr: &Address) -> u64 {
         self.get_account(addr)
             .map(|account| account.balance)
             .unwrap_or(0)
     }
 
+    /// Sets the balance for an address, creating the account if needed.
+    ///
+    /// # Arguments
+    /// - `addr`: Address whose balance should be updated.
+    /// - `balance`: New balance to store.
     pub fn set_balance(&mut self, addr: &Address, balance: u64) {
         self.get_or_create(addr).balance = balance;
     }
 
+    /// Moves balance between two addresses.
+    ///
+    /// # Arguments
+    /// - `from`: Sender address.
+    /// - `to`: Recipient address.
+    /// - `amount`: Amount of balance to transfer.
+    ///
+    /// # Returns
+    /// `Ok(())` if the transfer succeeds, or an error if the sender lacks funds.
     pub fn transfer(
         &mut self,
         from: &Address,
@@ -84,6 +130,13 @@ impl WorldState {
         Ok(())
     }
 
+    /// Applies every transaction in a block to this world state.
+    ///
+    /// # Arguments
+    /// - `block`: Block whose transactions should be applied.
+    ///
+    /// # Returns
+    /// `Ok(())` if all transactions succeed, or the first state error encountered.
     pub fn apply_block(&mut self, block: &Block) -> Result<(), StateError> {
         for transaction in &block.transactions {
             self.apply_transaction(transaction)?;
@@ -91,11 +144,26 @@ impl WorldState {
         Ok(())
     }
 
+    /// Applies a transaction without invoking the VM.
+    ///
+    /// # Arguments
+    /// - `transaction`: Transaction to apply.
+    ///
+    /// # Returns
+    /// `Ok(())` if the transaction succeeds, or a state error otherwise.
     pub fn apply_transaction(&mut self, transaction: &Transaction) -> Result<(), StateError> {
         self.apply_transaction_with_vm(transaction, None)
             .map(|_| ())
     }
 
+    /// Applies a transaction, optionally executing contract calls through the VM.
+    ///
+    /// # Arguments
+    /// - `transaction`: Transaction to apply.
+    /// - `vm`: Optional VM engine used to execute contract calls.
+    ///
+    /// # Returns
+    /// The resulting execution context and gas report, or a state error.
     pub fn apply_transaction_with_vm(
         &mut self,
         transaction: &Transaction,

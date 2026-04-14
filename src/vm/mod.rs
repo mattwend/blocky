@@ -7,7 +7,9 @@ use wasmtime::{Config, Engine, Linker, Module, Store};
 
 use crate::{Address, Hash};
 
+/// Gas schedule constants and helpers for VM execution.
 pub mod gas;
+/// Host bindings exposed to guest Wasm contracts.
 pub mod host;
 
 pub use host::{ExecutionContext, HostError, VmHostState};
@@ -17,30 +19,44 @@ struct PreparedCall {
     method: String,
 }
 
+/// Wasmtime-based execution engine with a cache of compiled contract modules.
 pub struct VmEngine {
     engine: Engine,
     linker: Linker<VmHostState>,
     module_cache: HashMap<Hash, Arc<Module>>,
 }
 
+/// Gas accounting summary for a contract call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GasReport {
+    /// Maximum gas made available to the call.
     pub gas_limit: u64,
+    /// Gas actually consumed by the call.
     pub gas_used: u64,
 }
 
+/// All inputs required to execute a single contract call.
 #[derive(Debug, Clone)]
 pub struct CallRequest<'a> {
+    /// World state snapshot to execute against.
     pub state: crate::WorldState,
+    /// External account that initiated the call.
     pub caller: Address,
+    /// Contract address being executed.
     pub contract: Address,
+    /// Balance transferred into the contract before execution.
     pub deposit: u64,
+    /// Exported guest method to invoke.
     pub method: &'a str,
+    /// Encoded input bytes passed to the guest.
     pub args: &'a [u8],
+    /// Wasm bytecode for the target contract.
     pub code: &'a [u8],
+    /// Maximum gas available to the call.
     pub gas_limit: u64,
 }
 
+/// Errors produced while preparing or executing a Wasm contract call.
 #[derive(Debug, Error)]
 pub enum VmError {
     #[error("failed to configure wasmtime engine: {0}")]
@@ -56,6 +72,10 @@ pub enum VmError {
 }
 
 impl VmEngine {
+    /// Creates a new VM engine with deterministic Wasmtime settings and linked host functions.
+    ///
+    /// # Returns
+    /// A ready-to-use VM engine, or an error if initialization fails.
     pub fn new() -> Result<Self, VmError> {
         let engine = Engine::new(&deterministic_config()?)?;
         let mut linker = Linker::new(&engine);
@@ -68,18 +88,37 @@ impl VmEngine {
         })
     }
 
+    /// Returns the underlying Wasmtime engine.
+    ///
+    /// # Returns
+    /// A shared reference to the configured engine.
     pub fn engine(&self) -> &Engine {
         &self.engine
     }
 
+    /// Returns the linker containing all registered host functions.
+    ///
+    /// # Returns
+    /// A shared reference to the VM linker.
     pub fn linker(&self) -> &Linker<VmHostState> {
         &self.linker
     }
 
+    /// Returns the number of compiled modules currently cached.
+    ///
+    /// # Returns
+    /// The current module cache size.
     pub fn module_cache_len(&self) -> usize {
         self.module_cache.len()
     }
 
+    /// Compiles and caches a module if it is not already present.
+    ///
+    /// # Arguments
+    /// - `code`: Raw Wasm bytecode to compile.
+    ///
+    /// # Returns
+    /// The code hash used as the cache key, or an error if compilation fails.
     pub fn cache_module(&mut self, code: &[u8]) -> Result<Hash, VmError> {
         let code_hash = code_hash(code);
         if self.module_cache.contains_key(&code_hash) {
@@ -91,16 +130,37 @@ impl VmEngine {
         Ok(code_hash)
     }
 
+    /// Returns a previously cached compiled module.
+    ///
+    /// # Arguments
+    /// - `code_hash`: Hash of the module bytecode.
+    ///
+    /// # Returns
+    /// The cached module if present.
     pub fn get_cached_module(&self, code_hash: &Hash) -> Option<Arc<Module>> {
         self.module_cache.get(code_hash).cloned()
     }
 
+    /// Ensures a module is cached and returns the compiled instance template.
+    ///
+    /// # Arguments
+    /// - `code`: Raw Wasm bytecode to prepare.
+    ///
+    /// # Returns
+    /// The compiled module, or an error if compilation or cache lookup fails.
     pub fn prepare_module(&mut self, code: &[u8]) -> Result<Arc<Module>, VmError> {
         let code_hash = self.cache_module(code)?;
         self.get_cached_module(&code_hash)
             .ok_or_else(|| VmError::EngineConfig(wasmtime::Error::msg("cached module missing")))
     }
 
+    /// Executes a contract call against the provided world state snapshot.
+    ///
+    /// # Arguments
+    /// - `request`: Complete description of the call to execute.
+    ///
+    /// # Returns
+    /// The post-call world state, execution context, and gas report, or a VM error.
     pub fn execute_call_with_state(
         &mut self,
         request: CallRequest<'_>,
@@ -192,6 +252,13 @@ fn extract_error_message(error: &wasmtime::Error) -> Option<String> {
     error.downcast_ref::<AnyhowError>().map(ToString::to_string)
 }
 
+/// Computes the code hash used to cache compiled Wasm modules.
+///
+/// # Arguments
+/// - `code`: Raw Wasm bytecode to hash.
+///
+/// # Returns
+/// A 32-byte SHA-256 digest of the code.
 pub fn code_hash(code: &[u8]) -> Hash {
     let digest = Sha256::digest(code);
     let mut hash = [0_u8; 32];

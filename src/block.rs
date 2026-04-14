@@ -4,17 +4,31 @@ use sha2::{Digest, Sha256};
 
 use crate::{BlockyError, transaction::Transaction};
 
+/// A 32-byte SHA-256 digest used for block and code hashes.
 pub type Hash = [u8; 32];
 
+/// A mined block containing transactions and proof-of-work metadata.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Block {
+    /// Unix timestamp captured when the block was created.
     pub timestamp: u64,
+    /// Hash of the previous block, or all zeros for genesis.
     pub prev_hash: Hash,
+    /// Nonce adjusted during mining until the hash meets difficulty.
     pub nonce: u64,
+    /// Transactions included in this block.
     pub transactions: Vec<Transaction>,
 }
 
 impl Block {
+    /// Creates a new block with the current UTC timestamp and a zero nonce.
+    ///
+    /// # Arguments
+    /// - `transactions`: Transactions to include in the block.
+    /// - `prev_hash`: Hash of the previous block in the chain.
+    ///
+    /// # Returns
+    /// A new block ready to be mined.
     pub fn new(transactions: Vec<Transaction>, prev_hash: Hash) -> Self {
         Self {
             timestamp: Utc::now().timestamp() as u64,
@@ -24,6 +38,10 @@ impl Block {
         }
     }
 
+    /// Computes the block hash from its header fields and serialized transactions.
+    ///
+    /// # Returns
+    /// The SHA-256 digest for this block, or an error if transaction serialization fails.
     pub fn compute_hash(&self) -> Result<Hash, BlockyError> {
         let serialized_transactions = serde_json::to_string(&self.transactions)
             .map_err(BlockyError::BlockHashSerialization)?;
@@ -41,6 +59,13 @@ impl Block {
         Ok(hash)
     }
 
+    /// Increments the nonce until the block hash satisfies the given difficulty.
+    ///
+    /// # Arguments
+    /// - `difficulty`: Required number of leading zero bits in the mined hash.
+    ///
+    /// # Returns
+    /// `Ok(())` once a valid nonce is found, or an error if hashing fails.
     pub fn mine(&mut self, difficulty: u32) -> Result<(), BlockyError> {
         while !hash_meets_difficulty(&self.compute_hash()?, difficulty) {
             self.nonce = self.nonce.saturating_add(1);
@@ -49,6 +74,14 @@ impl Block {
     }
 }
 
+/// Returns whether a hash satisfies a leading-zero-bit proof-of-work target.
+///
+/// # Arguments
+/// - `hash`: Hash to test.
+/// - `difficulty`: Required number of leading zero bits.
+///
+/// # Returns
+/// `true` if the hash meets the difficulty target, otherwise `false`.
 pub fn hash_meets_difficulty(hash: &Hash, difficulty: u32) -> bool {
     let full_zero_bytes = (difficulty / 8) as usize;
     let remaining_bits = (difficulty % 8) as usize;
@@ -67,6 +100,13 @@ pub fn hash_meets_difficulty(hash: &Hash, difficulty: u32) -> bool {
         .unwrap_or(false)
 }
 
+/// Encodes a hash as lowercase hexadecimal.
+///
+/// # Arguments
+/// - `hash`: Hash to encode.
+///
+/// # Returns
+/// A lowercase hexadecimal string representation of the hash.
 pub fn hash_to_hex(hash: &Hash) -> String {
     hex::encode(hash)
 }
