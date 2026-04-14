@@ -1,6 +1,6 @@
 use std::{
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Command,
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -17,30 +17,58 @@ fn unique_contract_dir() -> PathBuf {
     ))
 }
 
+struct ContractBuildDir {
+    path: PathBuf,
+}
+
+impl ContractBuildDir {
+    fn new() -> Self {
+        let path = unique_contract_dir();
+        fs::create_dir_all(path.join("src")).unwrap();
+        Self { path }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for ContractBuildDir {
+    fn drop(&mut self) {
+        if let Err(error) = fs::remove_dir_all(&self.path) {
+            eprintln!(
+                "failed to remove temporary contract directory {}: {error}",
+                self.path.display()
+            );
+        }
+    }
+}
+
 fn build_contract_source(source: &str) -> Vec<u8> {
-    let dir = unique_contract_dir();
-    fs::create_dir_all(dir.join("src")).unwrap();
+    let dir = ContractBuildDir::new();
+    let dir_path = dir.path();
 
     fs::write(
-        dir.join("Cargo.toml"),
+        dir_path.join("Cargo.toml"),
         format!(
             "[package]\nname = \"sdk-e2e-contract\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\ncrate-type = [\"cdylib\"]\n\n[profile.release]\npanic = \"abort\"\n\n[dependencies]\nblocky-sdk = {{ path = {:?} }}\nborsh = {{ version = \"1\", features = [\"derive\"] }}\n",
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("blocky-sdk")
         ),
     )
     .unwrap();
-    fs::write(dir.join("src/lib.rs"), source).unwrap();
+    fs::write(dir_path.join("src/lib.rs"), source).unwrap();
 
     let status = Command::new("cargo")
         .args(["build", "--target", "wasm32-unknown-unknown", "--release"])
         .env("RUSTFLAGS", "-C debuginfo=2")
-        .current_dir(&dir)
+        .current_dir(dir_path)
         .status()
         .unwrap();
     assert!(status.success(), "contract build failed");
 
     let wasm =
-        fs::read(dir.join("target/wasm32-unknown-unknown/release/sdk_e2e_contract.wasm")).unwrap();
+        fs::read(dir_path.join("target/wasm32-unknown-unknown/release/sdk_e2e_contract.wasm"))
+            .unwrap();
     strip_custom_sections(&wasm)
 }
 
