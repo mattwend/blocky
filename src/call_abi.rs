@@ -6,8 +6,10 @@ use thiserror::Error;
 /// Errors returned when decoding structured contract call input.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum CallAbiError {
+    /// No bytes were provided for the call envelope.
     #[error("call envelope is empty")]
     Empty,
+    /// Borsh decoding of the call envelope failed.
     #[error("failed to decode call envelope: {0}")]
     Decode(String),
 }

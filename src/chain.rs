@@ -14,16 +14,32 @@ use crate::{
 /// Errors produced while building, validating, or executing the blockchain.
 #[derive(Debug, Error)]
 pub enum BlockyError {
+    /// Mining was requested without any queued transactions.
     #[error("cannot mine a block without pending transactions")]
     NoPendingTransactions,
+    /// Serialization failed while computing a block or transaction hash.
     #[error("failed to serialize data while hashing: {0}")]
     HashSerialization(#[source] std::io::Error),
+    /// The sender cannot cover the requested transaction cost.
     #[error("sender has insufficient balance: available {available}, required {required}")]
-    InsufficientBalance { available: u64, required: u64 },
+    InsufficientBalance {
+        /// Balance still available for the sender after reserving pending costs.
+        available: u64,
+        /// Additional balance required for the transaction being validated.
+        required: u64,
+    },
+    /// The sender nonce does not match the next expected value.
     #[error("sender nonce mismatch: expected {expected}, got {got}")]
-    InvalidNonce { expected: u64, got: u64 },
+    InvalidNonce {
+        /// Nonce expected by the chain for this sender.
+        expected: u64,
+        /// Nonce supplied by the transaction.
+        got: u64,
+    },
+    /// State transition validation or execution failed.
     #[error(transparent)]
     State(#[from] StateError),
+    /// VM preparation or execution failed.
     #[error(transparent)]
     Vm(#[from] VmError),
 }
@@ -165,7 +181,6 @@ impl Blockchain {
                         _ => BASE_TX_COST,
                     };
                     receipts.push(Receipt::failure(transaction, gas_used, error.to_string())?);
-                    self.receipts.push(receipts);
                     self.pending_transactions = transactions;
                     return Err(error.into());
                 }
@@ -346,10 +361,7 @@ mod tests {
             error,
             BlockyError::State(crate::StateError::Vm(_))
         ));
-        assert_eq!(chain.receipts.len(), 1);
-        assert_eq!(chain.receipts[0].len(), 2);
-        assert!(chain.receipts[0][0].success);
-        assert!(!chain.receipts[0][1].success);
+        assert!(chain.receipts.is_empty());
         assert_eq!(chain.chain.len(), 1);
         assert!(chain.state.get_account(&contract).is_none());
         assert_eq!(chain.pending_transactions, vec![deploy, failing_call]);

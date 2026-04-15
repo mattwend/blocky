@@ -235,16 +235,9 @@ pub extern "C" fn explode() {
     assert!(contract_account.storage.is_empty());
     assert_eq!(chain.state.get_balance(&contract), 0);
 
-    let receipts = chain.receipts.last().unwrap();
-    let receipt = receipts.last().unwrap();
-    assert!(!receipt.success);
-    assert!(
-        receipt
-            .error
-            .as_ref()
-            .is_some_and(|error| !error.is_empty())
-    );
-    assert!(receipt.logs.is_empty());
+    assert_eq!(chain.receipts.len(), 1);
+    assert_eq!(chain.receipts[0].len(), 1);
+    assert!(chain.receipts[0][0].success);
 }
 
 #[test]

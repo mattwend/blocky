@@ -27,14 +27,29 @@ pub struct AccountState {
 /// Errors produced while mutating or validating world state transitions.
 #[derive(Debug, Error)]
 pub enum StateError {
+    /// An account cannot cover the requested balance transfer or deposit.
     #[error("insufficient balance: available {available}, required {required}")]
-    InsufficientBalance { available: u64, required: u64 },
+    InsufficientBalance {
+        /// Balance currently available on the account.
+        available: u64,
+        /// Balance required to complete the operation.
+        required: u64,
+    },
+    /// A transaction nonce does not match the account's next expected nonce.
     #[error("invalid nonce for account: expected {expected}, got {got}")]
-    InvalidNonce { expected: u64, got: u64 },
+    InvalidNonce {
+        /// Nonce currently expected for the account.
+        expected: u64,
+        /// Nonce supplied by the transaction.
+        got: u64,
+    },
+    /// Deployment targeted an address that already contains a contract.
     #[error("contract deployment already exists at derived address")]
     ContractAlreadyExists,
+    /// A contract call targeted an account with no deployed code.
     #[error("contract call target has no code")]
     ContractCodeMissing,
+    /// VM execution failed while applying a contract call.
     #[error(transparent)]
     Vm(#[from] VmError),
 }

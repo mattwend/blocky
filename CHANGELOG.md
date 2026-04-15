@@ -33,4 +33,16 @@ Initial open-source release.
 
 ## [Unreleased]
 
-- No unreleased changes yet.
+## [1.0.1] - 2026-04-15
+
+### Changed
+
+- Shared short address and hash display helpers between the demo and REPL so both interfaces format identifiers consistently.
+- Enforced rustdoc coverage for public API items and documented remaining public modules, enums, variants, and REPL API surfaces.
+- Expanded REPL documentation to describe the supported JSON-to-Borsh argument encoding used for contract calls.
+
+### Fixed
+
+- VM host memory reads now use the static address size directly when decoding addresses.
+- Receipt persistence during mining is now transactional: failed mined batches do not append a new receipt batch, while prior successful batches remain intact.
+- Added field-level documentation for public receipt fields to keep the public API documented consistently.

@@ -61,16 +61,22 @@ pub struct VmHostState {
 /// Errors raised by VM host functions when interacting with guest memory or state.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum HostError {
+    /// The guest instance did not export linear memory as `memory`.
     #[error("guest memory export \"memory\" is missing")]
     MissingMemory,
+    /// The guest passed a negative pointer or length.
     #[error("negative pointer or length")]
     NegativeOffset,
+    /// The guest attempted to read or write outside its linear memory.
     #[error("guest memory access out of bounds")]
     OutOfBounds,
+    /// Execution attempted to use host state before initializing the context.
     #[error("execution context is missing")]
     MissingContext,
+    /// A world-state mutation failed.
     #[error("state operation failed: {0}")]
     State(String),
+    /// Fuel accounting failed or the guest ran out of gas.
     #[error("failed to charge gas: {0}")]
     Gas(String),
 }
@@ -427,7 +433,7 @@ fn charge_gas(caller: &mut Caller<'_, VmHostState>, amount: u64) -> Result<(), H
 }
 
 fn read_address(caller: &mut Caller<'_, VmHostState>, ptr: i32) -> Result<Address, HostError> {
-    let bytes = read_memory(caller, ptr, Address::default().len() as i32)?;
+    let bytes = read_memory(caller, ptr, std::mem::size_of::<Address>() as i32)?;
     let mut address = [0_u8; 32];
     address.copy_from_slice(&bytes);
     Ok(address)

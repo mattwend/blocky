@@ -58,14 +58,19 @@ pub struct CallRequest<'a> {
 /// Errors produced while preparing or executing a Wasm contract call.
 #[derive(Debug, Error)]
 pub enum VmError {
+    /// Wasmtime engine setup, module compilation, instantiation, or execution failed.
     #[error("failed to configure wasmtime engine: {0}")]
     EngineConfig(#[from] wasmtime::Error),
+    /// A host function failed while the guest was executing.
     #[error(transparent)]
     Host(#[from] host::HostError),
+    /// The requested exported guest method does not exist.
     #[error("contract method not found: {0}")]
     MissingMethod(String),
+    /// The guest aborted execution without a message.
     #[error("contract execution aborted")]
     Aborted,
+    /// The guest aborted execution and provided a message.
     #[error("contract execution aborted: {0}")]
     AbortedWithMessage(String),
 }

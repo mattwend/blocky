@@ -4,12 +4,18 @@ use sha2::{Digest, Sha256};
 
 use crate::{chain::BlockyError, transaction::Transaction};
 
+/// Outcome recorded for a mined transaction.
 #[derive(Debug, Clone, Serialize, Deserialize, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
 pub struct Receipt {
+    /// Deterministic hash of the transaction this receipt belongs to.
     pub tx_hash: [u8; 32],
+    /// Whether the transaction completed successfully.
     pub success: bool,
+    /// Total gas charged for the transaction.
     pub gas_used: u64,
+    /// Log lines emitted during execution.
     pub logs: Vec<String>,
+    /// Human-readable error message for failed transactions.
     pub error: Option<String>,
 }
 

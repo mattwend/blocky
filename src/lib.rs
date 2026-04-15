@@ -1,3 +1,5 @@
+#![deny(missing_docs)]
+
 //! Blocky is a small educational blockchain and smart-contract playground written in Rust.
 //!
 //! The crate is organized into a few learner-friendly layers:
@@ -11,13 +13,21 @@
 //! If you are exploring the project for the first time, a good path is:
 //! [`Transaction`] -> [`Block`] -> [`WorldState`] -> [`Blockchain`] -> [`VmEngine`].
 
+/// Application-facing helpers for the demo binary and interactive REPL.
 pub mod app;
+/// Block structure, hashing, and proof-of-work utilities.
 pub mod block;
+/// Shared contract call ABI utilities.
 pub mod call_abi;
+/// Blockchain orchestration across blocks, state, receipts, and mining.
 pub mod chain;
+/// Transaction receipt types and hashing helpers.
 pub mod receipt;
+/// In-memory world-state types and transition logic.
 pub mod state;
+/// Transaction, payload, and address types.
 pub mod transaction;
+/// Wasm virtual machine integration, gas accounting, and host bindings.
 pub mod vm;
 
 pub use block::{Block, Hash, hash_to_hex};
