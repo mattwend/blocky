@@ -165,7 +165,6 @@ impl Blockchain {
                         _ => BASE_TX_COST,
                     };
                     receipts.push(Receipt::failure(transaction, gas_used, error.to_string())?);
-                    self.receipts.push(receipts);
                     self.pending_transactions = transactions;
                     return Err(error.into());
                 }
@@ -346,10 +345,7 @@ mod tests {
             error,
             BlockyError::State(crate::StateError::Vm(_))
         ));
-        assert_eq!(chain.receipts.len(), 1);
-        assert_eq!(chain.receipts[0].len(), 2);
-        assert!(chain.receipts[0][0].success);
-        assert!(!chain.receipts[0][1].success);
+        assert!(chain.receipts.is_empty());
         assert_eq!(chain.chain.len(), 1);
         assert!(chain.state.get_account(&contract).is_none());
         assert_eq!(chain.pending_transactions, vec![deploy, failing_call]);
