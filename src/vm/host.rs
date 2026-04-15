@@ -61,16 +61,22 @@ pub struct VmHostState {
 /// Errors raised by VM host functions when interacting with guest memory or state.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum HostError {
+    /// The guest instance did not export linear memory as `memory`.
     #[error("guest memory export \"memory\" is missing")]
     MissingMemory,
+    /// The guest passed a negative pointer or length.
     #[error("negative pointer or length")]
     NegativeOffset,
+    /// The guest attempted to read or write outside its linear memory.
     #[error("guest memory access out of bounds")]
     OutOfBounds,
+    /// Execution attempted to use host state before initializing the context.
     #[error("execution context is missing")]
     MissingContext,
+    /// A world-state mutation failed.
     #[error("state operation failed: {0}")]
     State(String),
+    /// Fuel accounting failed or the guest ran out of gas.
     #[error("failed to charge gas: {0}")]
     Gas(String),
 }

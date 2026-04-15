@@ -23,72 +23,111 @@ use crate::{
     app::{demo::render_chain, short_address, short_hash},
 };
 
+/// Errors returned while parsing commands or running the interactive REPL.
 #[derive(Debug, Error)]
 pub enum ReplError {
+    /// Terminal I/O failed.
     #[error(transparent)]
     Io(#[from] io::Error),
+    /// Blockchain execution failed while handling a command.
     #[error(transparent)]
     Blocky(#[from] BlockyError),
+    /// The command name is not recognized.
     #[error("unknown command: {0}")]
     UnknownCommand(String),
+    /// The `add` command arguments do not match the expected shape.
     #[error("usage: add <sender> <receiver> <amount>")]
     InvalidAddUsage,
+    /// The `deploy` command arguments do not match the expected shape.
     #[error("usage: deploy <sender> <path>")]
     InvalidDeployUsage,
+    /// The `call` command arguments do not match the expected shape.
     #[error("usage: call <sender> <addr> <method> [args|--hex <hex>|--json <json>]")]
     InvalidCallUsage,
+    /// The `--hex` argument payload could not be decoded.
     #[error("invalid hex args: {0}")]
     InvalidHexArgs(String),
+    /// The `--json` argument payload could not be converted into supported Borsh bytes.
     #[error("invalid json args: {0}")]
     InvalidJsonArgs(String),
+    /// The `balance` command arguments do not match the expected shape.
     #[error("usage: balance <addr>")]
     InvalidBalanceUsage,
+    /// A numeric amount argument failed to parse.
     #[error("invalid amount: {0}")]
     InvalidAmount(String),
+    /// The user opened a quoted token without closing it.
     #[error("unterminated quoted string")]
     UnterminatedQuote,
+    /// A hexadecimal address argument was malformed or the wrong length.
     #[error("invalid address hex: {0}")]
     InvalidAddress(String),
 }
 
+/// Input encoding selected for REPL contract-call arguments.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReplArgEncoding {
+    /// Treat the argument as a raw UTF-8 string.
     Utf8,
+    /// Treat the argument as raw hexadecimal bytes.
     Hex,
+    /// Treat the argument as a supported JSON value and encode it into Borsh bytes.
     Json,
 }
 
+/// Parsed REPL command ready for execution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReplCommand {
+    /// Queue a balance transfer.
     Add {
+        /// Human-readable sender name hashed into an address.
         sender: String,
+        /// Human-readable receiver name hashed into an address.
         receiver: String,
+        /// Amount of balance to transfer.
         amount: u64,
     },
+    /// Queue a contract deployment from a Wasm file path.
     Deploy {
+        /// Human-readable sender name hashed into an address.
         sender: String,
+        /// Filesystem path to the Wasm module.
         path: String,
     },
+    /// Queue a contract call.
     Call {
+        /// Human-readable sender name hashed into an address.
         sender: String,
+        /// Target contract address.
         contract: crate::Address,
+        /// Exported method to invoke.
         method: String,
+        /// Encoded call arguments.
         args: Vec<u8>,
+        /// Encoding used to build `args`.
         encoding: ReplArgEncoding,
     },
+    /// Print the current balance for an address.
     Balance {
+        /// Address whose balance should be shown.
         address: crate::Address,
     },
+    /// Mine all pending transactions.
     Mine,
+    /// Print the full chain view.
     Print,
+    /// Validate the current chain.
     Validate,
+    /// Show the REPL help text.
     Help,
+    /// Exit the REPL.
     Quit,
 }
 
 const MAX_OUTPUT_LINES: usize = 500;
 const MAX_HISTORY_ENTRIES: usize = 100;
 
+/// Interactive terminal REPL state and execution engine.
 pub struct Repl {
     blockchain: Blockchain,
     input: String,
@@ -99,6 +138,13 @@ pub struct Repl {
 }
 
 impl Repl {
+    /// Creates a new REPL with an empty blockchain and welcome output.
+    ///
+    /// # Arguments
+    /// - `difficulty`: Proof-of-work difficulty used for mining.
+    ///
+    /// # Returns
+    /// A ready-to-run REPL instance, or an error if blockchain initialization fails.
     pub fn try_new(difficulty: u32) -> Result<Self, ReplError> {
         Ok(Self {
             blockchain: Blockchain::try_new(difficulty)?,
@@ -113,6 +159,11 @@ impl Repl {
         })
     }
 
+    /// Runs the interactive terminal UI until the user exits.
+    ///
+    /// # Returns
+    /// `Ok(())` when the REPL exits cleanly, or an error if terminal setup or
+    /// event handling fails.
     pub fn run(&mut self) -> Result<(), ReplError> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
@@ -129,6 +180,15 @@ impl Repl {
         result
     }
 
+    /// Parses and executes a single command line.
+    ///
+    /// # Arguments
+    /// - `line`: Raw command line entered by the user.
+    ///
+    /// # Returns
+    /// `Ok(true)` when the command requests REPL exit, `Ok(false)` when
+    /// execution should continue, or an error if parsing or command execution
+    /// fails.
     pub fn execute_line(&mut self, line: &str) -> Result<bool, ReplError> {
         self.push_output(format!("> {line}"));
         info!(command = line, "executing repl command");
@@ -534,6 +594,14 @@ impl Repl {
     }
 }
 
+/// Parses a raw REPL input line into a structured command.
+///
+/// # Arguments
+/// - `line`: Raw user input line.
+///
+/// # Returns
+/// The parsed command, or a [`ReplError`] if tokenization or argument
+/// validation fails.
 pub fn parse_command(line: &str) -> Result<ReplCommand, ReplError> {
     let parts = tokenize(line)?;
     let Some(command) = parts.first().map(String::as_str) else {
@@ -604,7 +672,6 @@ fn parse_address_hex(input: &str) -> Result<crate::Address, ReplError> {
     address.copy_from_slice(&bytes);
     Ok(address)
 }
-
 
 fn describe_encoding(encoding: &ReplArgEncoding) -> &'static str {
     match encoding {
