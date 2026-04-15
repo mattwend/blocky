@@ -427,7 +427,7 @@ fn charge_gas(caller: &mut Caller<'_, VmHostState>, amount: u64) -> Result<(), H
 }
 
 fn read_address(caller: &mut Caller<'_, VmHostState>, ptr: i32) -> Result<Address, HostError> {
-    let bytes = read_memory(caller, ptr, Address::default().len() as i32)?;
+    let bytes = read_memory(caller, ptr, std::mem::size_of::<Address>() as i32)?;
     let mut address = [0_u8; 32];
     address.copy_from_slice(&bytes);
     Ok(address)
