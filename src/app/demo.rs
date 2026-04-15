@@ -5,6 +5,8 @@ use crate::{
     transaction_hash,
 };
 
+use super::{short_address, short_hash};
+
 /// Builds the demo blockchain used by the printable walkthrough.
 ///
 /// # Arguments
@@ -116,12 +118,4 @@ pub fn render_chain(blockchain: &Blockchain) -> Result<String, BlockyError> {
     }
 
     Ok(output)
-}
-
-fn short_hash(hash: &[u8; 32]) -> String {
-    hex::encode(hash).chars().take(8).collect()
-}
-
-fn short_address(address: &crate::Address) -> String {
-    address_to_hex(address).chars().take(8).collect()
 }

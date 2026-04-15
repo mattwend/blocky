@@ -19,8 +19,8 @@ use thiserror::Error;
 use tracing::{debug, info};
 
 use crate::{
-    Blockchain, BlockyError, Transaction, address_from_name, address_to_hex,
-    app::demo::render_chain,
+    Blockchain, BlockyError, Transaction, address_from_name,
+    app::{demo::render_chain, short_address, short_hash},
 };
 
 #[derive(Debug, Error)]
@@ -605,14 +605,6 @@ fn parse_address_hex(input: &str) -> Result<crate::Address, ReplError> {
     Ok(address)
 }
 
-fn short_address(address: &crate::Address) -> String {
-    let hex = address_to_hex(address);
-    hex.chars().take(8).collect()
-}
-
-fn short_hash(hash: &[u8; 32]) -> String {
-    hex::encode(hash).chars().take(8).collect()
-}
 
 fn describe_encoding(encoding: &ReplArgEncoding) -> &'static str {
     match encoding {
