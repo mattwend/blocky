@@ -633,6 +633,17 @@ fn json_to_borsh_bytes(input: &str) -> Result<(Vec<u8>, ReplArgEncoding), ReplEr
     Ok((bytes, ReplArgEncoding::Json))
 }
 
+/// Encodes a small JSON subset into Borsh bytes for REPL convenience.
+///
+/// Supported mappings:
+/// - `null` -> empty byte vector
+/// - booleans -> Borsh `bool`
+/// - numbers -> Borsh `u64` when non-negative, otherwise Borsh `i64`
+/// - strings -> Borsh `String`
+/// - arrays -> Borsh `Vec<u8>` when every element is a JSON number in `0..=255`
+///
+/// Objects are intentionally unsupported because the REPL does not attempt to
+/// infer arbitrary Rust struct layouts from JSON.
 fn encode_json_value(value: &Value) -> Result<Vec<u8>, ReplError> {
     match value {
         Value::Null => Ok(Vec::new()),
